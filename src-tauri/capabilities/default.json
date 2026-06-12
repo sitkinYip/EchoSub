@@ -26,7 +26,19 @@
       ]
     },
     "shell:allow-stdin-write",
-    "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$TEMP/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$VIDEO/**" },
+        { "path": "https://dashscope.aliyuncs.com/**" },
+        { "path": "https://dashscope.aliyun.com/**" }
+      ]
+    },
     {
       "identifier": "fs:default",
       "allow": [

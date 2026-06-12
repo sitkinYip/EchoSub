@@ -140,6 +140,39 @@ fn get_file_info(path: String) -> Result<FileInfo, String> {
 }
 
 #[tauri::command]
+fn reveal_in_folder(path: String) -> Result<(), String> {
+    let exists = fs::metadata(&path).is_ok();
+    if !exists {
+        return Err(format!("文件不存在: {path}"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("无法打开 Finder: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn()
+            .map_err(|e| format!("无法打开资源管理器: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let parent = Path::new(&path).parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or(&path);
+        std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| format!("无法打开文件管理器: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn read_audio_base64(path: String) -> Result<String, String> {
     let bytes = fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
@@ -292,6 +325,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_audio_base64,
             get_file_info,
+            reveal_in_folder,
             stream_translate_file
         ])
         .run(tauri::generate_context!())

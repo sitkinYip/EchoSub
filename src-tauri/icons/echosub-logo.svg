@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Solid background — no gradients, no rgba -->
+  <rect width="512" height="512" rx="112" fill="#1E1E2E"/>
+
+  <!-- Border ring -->
+  <rect x="4" y="4" width="504" height="504" rx="108" fill="none" stroke="#3B3B52" stroke-width="4"/>
+
+  <!-- E + sound wave monogram -->
+  <g stroke="#FFFFFF" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Vertical bar of E -->
+    <line x1="142" y1="102" x2="142" y2="410" stroke-width="28"/>
+
+    <!-- Top wave line -->
+    <path d="M192 140 Q268 108 372 120" stroke-width="24"/>
+
+    <!-- Middle wave line (double curve) -->
+    <path d="M192 256 Q268 226 328 240 Q378 256 404 240" stroke-width="24"/>
+
+    <!-- Bottom wave line -->
+    <path d="M192 372 Q268 340 372 352" stroke-width="24"/>
+  </g>
+</svg>
