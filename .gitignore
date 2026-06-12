@@ -1,0 +1,40 @@
+# ── Dependencies ──────────────────────────────────
+node_modules/
+
+# ── Build outputs ────────────────────────────────
+/dist/
+/src-tauri/target/
+
+# ── Tauri generated files (regenerated on build) ─
+/src-tauri/gen/
+
+# ── FFmpeg binary (too large, download separately) ─
+/src-tauri/binaries/ffmpeg-*
+!/src-tauri/binaries/.gitkeep
+
+# ── macOS ────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+
+# ── IDE / Editor ─────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Environment / Secrets ────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── OS junk ──────────────────────────────────────
+Thumbs.db
+Desktop.ini
+
+# ── Logs ─────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── Misc local tooling ───────────────────────────
+.aone_copilot/

@@ -1,0 +1,52 @@
+{
+  "$schema": "../schemas/capability-schema.json",
+  "identifier": "default",
+  "description": "默认权限配置",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/ffmpeg",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/ffmpeg",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    "shell:allow-stdin-write",
+    "shell:allow-open",
+    {
+      "identifier": "fs:default",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$TEMP/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$VIDEO/**" }
+      ]
+    },
+    "fs:allow-read-file",
+    "fs:allow-write-text-file",
+    "dialog:default",
+    "store:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://dashscope.aliyuncs.com/**" }
+      ]
+    }
+  ]
+}

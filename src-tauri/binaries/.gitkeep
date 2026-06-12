@@ -1,0 +1,12 @@
+# 在此目录放置 FFmpeg 二进制文件
+#
+# 命名规则 (Tauri Sidecar):
+#   macOS (Apple Silicon): ffmpeg-aarch64-apple-darwin
+#   macOS (Intel):         ffmpeg-x86_64-apple-darwin
+#   Windows:               ffmpeg-x86_64-pc-windows-msvc.exe
+#   Linux:                 ffmpeg-x86_64-unknown-linux-gnu
+#
+# 下载方式:
+#   1. 从 https://ffmpeg.org/download.html 获取对应平台的静态编译版
+#   2. 重命名为上述格式并放入此目录
+#   3. 赋予执行权限 (macOS/Linux): chmod +x <filename>
