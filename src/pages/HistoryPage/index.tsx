@@ -1,11 +1,11 @@
-import React, { useEffect } from "react";
-import { useTranslationStore } from "@/stores/translationStore";
+import { useEffect } from "react";
+import { useHistoryStore } from "@/stores/historyStore";
 import HistoryCard from "@/pages/HistoryPage/HistoryCard";
 
 export default function HistoryPage() {
-  const { history, historyLoaded, loadHistory, deleteHistoryEntry } = useTranslationStore();
+  const { history, historyLoaded, load, deleteEntry } = useHistoryStore();
 
-  useEffect(() => { if (!historyLoaded) loadHistory(); }, []); // eslint-disable-line
+  useEffect(() => { if (!historyLoaded) load(); }, []);
 
   if (!historyLoaded) return null;
 
@@ -40,7 +40,7 @@ export default function HistoryPage() {
             <HistoryCard
               key={entry.id}
               entry={entry}
-              onDelete={() => deleteHistoryEntry(entry.id)}
+              onDelete={() => deleteEntry(entry.id)}
             />
           ))}
         </div>

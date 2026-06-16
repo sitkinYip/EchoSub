@@ -1,14 +1,23 @@
-import React, { useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import SubtitlePreview from "@/components/SubtitlePreview";
-import { useTranslationStore } from "@/stores/translationStore";
+import { useHistoryStore } from "@/stores/historyStore";
 import type { ModalContentProps } from "@/config/modals";
 import type { SubtitleItem, Language } from "@/types";
 
 interface EditData { historyId: string; title: string; sourceLang: Language; targetLang: Language; }
 
 export default function HistoryEditModal({ close, data }: ModalContentProps<EditData>) {
-  const entry = useTranslationStore((s) => s.history.find((e) => e.id === data.historyId));
-  const updateHistorySubtitles = useTranslationStore((s) => s.updateHistorySubtitles);
+  const entry = useHistoryStore((s) => s.history.find((e) => e.id === data.historyId));
+  const updateSubtitles = useHistoryStore((s) => s.updateSubtitles);
+
+  if (!entry) {
+    return (
+      <div className="flex flex-col items-center py-8">
+        <p className="text-app-text-secondary text-sm">该历史记录已被删除</p>
+        <button onClick={close} className="mt-4 px-4 py-2 rounded-xl bg-app-btn text-app-text text-sm">关闭</button>
+      </div>
+    );
+  }
 
   const [items, setItems] = useState<SubtitleItem[]>(() =>
     (entry?.subtitles ?? []).map((s) => ({ ...s }))
@@ -23,7 +32,7 @@ export default function HistoryEditModal({ close, data }: ModalContentProps<Edit
 
   const handleSave = async () => {
     setSaving(true);
-    await updateHistorySubtitles(data.historyId, items);
+    await updateSubtitles(data.historyId, items);
     setSaving(false);
     close();
   };

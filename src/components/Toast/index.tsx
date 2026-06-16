@@ -1,5 +1,5 @@
-import React from "react";
 import Icon from "@/components/Icon";
+import { useState, useEffect } from "react";
 import { useMessageStore } from "@/stores/messageStore";
 import { MESSAGE_ICONS, MESSAGE_BG, MESSAGE_TEXT, MESSAGE_ICON_BG } from "@/config/messages";
 
@@ -19,13 +19,13 @@ export default function ToastRenderer() {
 
 function ToastItem({ entry, onDismiss }: { entry: { id: string; config: any; leaving: boolean }; onDismiss: () => void }) {
   const { type, title, description } = entry.config;
-  const [anim, setAnim] = React.useState("enter");
+  const [anim, setAnim] = useState("enter");
 
-  React.useEffect(() => {
+  useEffect(() => {
     requestAnimationFrame(() => setAnim("active"));
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (entry.leaving && anim === "active") setAnim("exit");
   }, [entry.leaving, anim]);
 

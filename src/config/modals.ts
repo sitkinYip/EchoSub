@@ -37,6 +37,7 @@ export enum ModalName {
   ApiKey = "ApiKey",
   HistoryEdit = "HistoryEdit",
   RegenerateConfirm = "RegenerateConfirm",
+  LargeVideo = "LargeVideo",
 }
 
 /**
@@ -62,5 +63,9 @@ export const MODAL_REGISTRY: Record<
   [ModalName.RegenerateConfirm]: {
     defaults: { maskClosable: true, showClose: true, width: "sm" },
     loader: () => import("../pages/HistoryPage/RegenerateConfirmModal.tsx"),
+  },
+  [ModalName.LargeVideo]: {
+    defaults: { maskClosable: false, showClose: false, width: "sm" },
+    loader: () => import("../pages/TranslatePage/LargeVideoModal.tsx"),
   },
 };

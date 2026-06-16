@@ -1,9 +1,14 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { ModalContentProps } from "@/config/modals";
 
-export default function ApiKeyModal({ close }: ModalContentProps<Record<string, never>>) {
+interface ApiKeyData {
+  onCancel?: () => void;
+  onSaved?: (k: string, s: string, t: string, v: boolean) => void;
+}
+
+export default function ApiKeyModal({ close, data }: ModalContentProps<ApiKeyData>) {
   const { apiKey, sourceLang, targetLang, uploadVideo, update } = useSettingsStore();
 
   const [key, setKey] = useState(apiKey);
@@ -16,8 +21,17 @@ export default function ApiKeyModal({ close }: ModalContentProps<Record<string, 
     const trimmed = key.trim();
     if (!trimmed) return;
     setSaving(true);
-    await update({ apiKey: trimmed, sourceLang: src, targetLang: tgt, uploadVideo: upload });
+    if (data.onSaved) {
+      data.onSaved(trimmed, src, tgt, upload);
+    } else {
+      await update({ apiKey: trimmed, sourceLang: src, targetLang: tgt, uploadVideo: upload });
+    }
     setSaving(false);
+    close();
+  };
+
+  const handleCancel = () => {
+    data.onCancel?.();
     close();
   };
 
@@ -57,7 +71,7 @@ export default function ApiKeyModal({ close }: ModalContentProps<Record<string, 
           <p>模型：qwen3.5-omni-plus</p>
         </div>
         <div className="flex gap-3 pt-1">
-          <button onClick={close} className="flex-1 px-4 py-2.5 rounded-xl bg-app-surface hover:bg-app-hover text-app-text-secondary transition-all text-sm font-medium active:scale-[0.98]">
+          <button onClick={handleCancel} className="flex-1 px-4 py-2.5 rounded-xl bg-app-surface hover:bg-app-hover text-app-text-secondary transition-all text-sm font-medium active:scale-[0.98]">
             取消
           </button>
           <button

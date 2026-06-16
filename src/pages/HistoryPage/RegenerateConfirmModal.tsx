@@ -1,17 +1,18 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import Icon from "@/components/Icon";
 import LangSelect from "@/components/LangSelect";
 import { LANGUAGES } from "@/config";
 import type { ModalContentProps } from "@/config/modals";
+import type { Language } from "@/types";
 
 interface RegenerateData {
   videoName: string;
   videoPath: string;
   exists: boolean;
-  sourceLang: string;
-  targetLang: string;
+  sourceLang: Language;
+  targetLang: Language;
   uploadVideo: boolean;
-  onConfirm: (sourceLang: string, targetLang: string, uploadVideo: boolean) => void;
+  onConfirm: (sourceLang: Language, targetLang: Language, uploadVideo: boolean) => void;
 }
 
 export default function RegenerateConfirmModal({ close, data }: ModalContentProps<RegenerateData>) {

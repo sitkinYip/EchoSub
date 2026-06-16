@@ -1,5 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
-import ReactDOM from "react-dom/client";
+import { useEffect, useRef, useState } from "react";
 import { useModalStore } from "@/stores/modalStore";
 import Icon from "@/components/Icon";
 import { MODAL_WIDTHS } from "@/config/modals";
@@ -17,6 +16,8 @@ export default function ModalRenderer() {
     </>
   );
 }
+
+const MODAL_ANIM_DURATION = 300;
 
 function ModalInstance({ entry, isTop }: { entry: ModalEntry; isTop: boolean }) {
   const closeTop = useModalStore((s) => s.closeTop);
@@ -40,7 +41,7 @@ function ModalInstance({ entry, isTop }: { entry: ModalEntry; isTop: boolean }) 
   // Actually remove after exit animation completes
   useEffect(() => {
     if (phase === "exit") {
-      const t = setTimeout(() => markLeaving(entry.id), 350);
+      const t = setTimeout(() => markLeaving(entry.id), MODAL_ANIM_DURATION + 50);
       return () => clearTimeout(t);
     }
   }, [phase, entry.id, markLeaving]);

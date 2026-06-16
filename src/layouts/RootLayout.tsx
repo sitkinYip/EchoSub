@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import Icon from "@/components/Icon";
 import { NAV_ITEMS } from "@/config";
@@ -9,15 +9,15 @@ export default function RootLayout() {
   const loc = useLocation();
   const theme = useSettingsStore((s) => s.theme);
   const update = useSettingsStore((s) => s.update);
-  const [ind, setInd] = React.useState({ top: 0, height: 0 });
-  const navRef = React.useRef<HTMLDivElement>(null);
+  const [ind, setInd] = useState({ top: 0, height: 0 });
+  const navRef = useRef<HTMLDivElement>(null);
 
   // Sync theme class to <html>
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
   }, [theme]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const idx = NAV_ITEMS.findIndex((n) => n.path === loc.pathname);
     const btns = navRef.current?.querySelectorAll("button");
     const btn = btns?.[idx >= 0 ? idx : 0] as HTMLElement | undefined;

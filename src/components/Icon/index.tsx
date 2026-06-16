@@ -2,6 +2,8 @@ import type { IconName } from "@/config";
 
 interface Props { name: IconName; className?: string; }
 
+// All icons (<2KB total) bundled for simplicity; desktop app — bundle size not a concern.
+// For web targets, replace PATHS with dynamic imports per icon.
 export default function Icon({ name, className }: Props) {
   const paths = PATHS[name];
   const isSpinner = name === "spinner";
@@ -30,4 +32,5 @@ const PATHS: Record<IconName, React.ReactNode> = {
   moon: <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />,
   sun: <><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></>,
   warning: <><path d="M12 2L2 22h20L12 2z" /><line x1="12" y1="10" x2="12" y2="16" /><circle cx="12" cy="19" r="0.5" fill="currentColor" /></>,
+  help: <><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></>,
 };

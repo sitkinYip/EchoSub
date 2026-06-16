@@ -1,4 +1,4 @@
-import React from "react"; import Icon from "@/components/Icon";
+import Icon from "@/components/Icon";
 import type { SubtitleItem } from "@/types";
 import { itemsToSrt } from "@/utils/srtParser";
 import { save } from "@tauri-apps/plugin-dialog";

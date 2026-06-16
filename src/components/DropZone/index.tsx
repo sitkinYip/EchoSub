@@ -1,8 +1,8 @@
-import React, { useCallback, useRef, useState, useEffect } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Icon from "@/components/Icon";
-import { SUPPORTED_VIDEO_EXTS } from "@/config";
+import { ALL_SUPPORTED_EXTS } from "@/config";
 
 interface Props { onFileSelect: (filePath: string, fileName: string) => void; disabled?: boolean; }
 
@@ -11,11 +11,17 @@ export default function DropZone({ onFileSelect, disabled }: Props) {
   const ref = useRef(onFileSelect); ref.current = onFileSelect;
 
   useEffect(() => {
+    if (disabled) return;
     let cancelled = false; let clean: (() => void) | null = null;
     (async () => {
       try {
         const raw = getCurrentWindow(); const win = raw instanceof Promise ? await raw : raw;
         if (cancelled) return;
+        // Runtime check: Tauri v2 API may not include onDragDropEvent in all builds
+        if (typeof (win as any).onDragDropEvent !== "function") {
+          console.warn("onDragDropEvent not available — drag & drop disabled");
+          return;
+        }
         const un = await (win as any).onDragDropEvent((e: any) => {
           if (disabled) return;
           switch (e.payload.type) {
@@ -32,7 +38,7 @@ export default function DropZone({ onFileSelect, disabled }: Props) {
 
   const click = useCallback(async () => {
     if (disabled) return;
-    const sel = await open({ multiple: false, filters: [{ name: "视频文件", extensions: SUPPORTED_VIDEO_EXTS }] });
+    const sel = await open({ multiple: false, filters: [{ name: "媒体文件", extensions: ALL_SUPPORTED_EXTS }] });
     if (sel && typeof sel === "string") onFileSelect(sel, sel.split(/[/\\]/).pop() || sel);
   }, [disabled, onFileSelect]);
 
@@ -44,10 +50,10 @@ export default function DropZone({ onFileSelect, disabled }: Props) {
         <div className={`mb-5 w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-500 ring-1 ${drag ? "bg-app-accent-bg ring-app-accent-ring scale-110" : "bg-app-surface ring-app-border-light group-hover:bg-app-hover"}`}>
           <Icon name="upload" className={`w-7 h-7 transition-colors duration-300 ${drag ? "text-app-accent" : "text-app-text-tertiary group-hover:text-app-text-secondary"}`} />
         </div>
-        <p className="text-base font-medium text-app-text-secondary mb-1 tracking-tight">{drag ? "释放以导入" : "拖拽视频文件到此处"}</p>
+        <p className="text-base font-medium text-app-text-secondary mb-1 tracking-tight">{drag ? "释放以导入" : "拖拽视频或音频文件到此处"}</p>
         <p className="text-sm text-app-text-tertiary mb-6">或点击选择文件</p>
         <div className="flex flex-wrap justify-center gap-2">
-          {["MP4", "MKV", "MOV", "AVI"].map((e) => (<span key={e} className="px-3 py-1 text-[11px] font-medium bg-app-surface text-app-text-tertiary rounded-lg ring-1 ring-app-border-light">{e}</span>))}
+          {["MP4", "MKV", "MP3", "WAV", "AAC"].map((e) => (<span key={e} className="px-3 py-1 text-[11px] font-medium bg-app-surface text-app-text-tertiary rounded-lg ring-1 ring-app-border-light">{e}</span>))}
         </div>
         {/* Corner decorations */}
         <div className="absolute top-4 left-4 w-6 h-px bg-app-hover" /><div className="absolute top-4 left-4 w-px h-6 bg-app-hover" />

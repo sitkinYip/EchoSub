@@ -23,4 +23,5 @@ export interface HistoryEntry {
   subtitles: SubtitleItem[];
   status: "completed" | "error";
   error?: string;
+  subtitleFilePath?: string;
 }
