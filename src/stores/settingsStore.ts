@@ -14,7 +14,11 @@ interface SettingsState {
   loaded: boolean;
 
   load: () => Promise<void>;
-  update: (partial: Partial<Pick<SettingsState, "apiKey" | "sourceLang" | "targetLang" | "uploadVideo" | "theme">>) => Promise<void>;
+  update: (
+    partial: Partial<
+      Pick<SettingsState, "apiKey" | "sourceLang" | "targetLang" | "uploadVideo" | "theme">
+    >,
+  ) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -39,7 +43,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       let apiKey = "";
       let hasApiKey = false;
       try {
-        apiKey = await invoke("load_api_key") as string;
+        apiKey = (await invoke("load_api_key")) as string;
         hasApiKey = !!apiKey;
       } catch (err) {
         console.warn("无法加载 API Key:", err);

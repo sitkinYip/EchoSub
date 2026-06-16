@@ -7,6 +7,7 @@ export interface ModalContentProps<D = unknown> {
 
 /** 弹窗内容组件类型 */
 export type ModalComponent<D = unknown> = React.ComponentType<ModalContentProps<D>>;
+type ErasedModalComponent = ModalComponent<unknown>;
 
 /** 单个弹窗实例的运行时配置 */
 export interface ModalConfig {
@@ -49,23 +50,33 @@ export const MODAL_REGISTRY: Record<
   {
     defaults: Partial<ModalConfig>;
     /** 动态 import 避免循环依赖 */
-    loader: () => Promise<{ default: ModalComponent<any> }>;
+    loader: () => Promise<{ default: ErasedModalComponent }>;
   }
 > = {
   [ModalName.ApiKey]: {
     defaults: { maskClosable: false, showClose: false, width: "sm" },
-    loader: () => import("../components/ApiKeyModal/index.tsx"),
+    loader: () =>
+      import("../components/ApiKeyModal/index.tsx") as Promise<{ default: ErasedModalComponent }>,
   },
   [ModalName.HistoryEdit]: {
     defaults: { maskClosable: false, showClose: true, width: "lg" },
-    loader: () => import("../pages/HistoryPage/HistoryEditModal.tsx"),
+    loader: () =>
+      import("../pages/HistoryPage/HistoryEditModal.tsx") as Promise<{
+        default: ErasedModalComponent;
+      }>,
   },
   [ModalName.RegenerateConfirm]: {
     defaults: { maskClosable: true, showClose: true, width: "sm" },
-    loader: () => import("../pages/HistoryPage/RegenerateConfirmModal.tsx"),
+    loader: () =>
+      import("../pages/HistoryPage/RegenerateConfirmModal.tsx") as Promise<{
+        default: ErasedModalComponent;
+      }>,
   },
   [ModalName.LargeVideo]: {
     defaults: { maskClosable: false, showClose: false, width: "sm" },
-    loader: () => import("../pages/TranslatePage/LargeVideoModal.tsx"),
+    loader: () =>
+      import("../pages/TranslatePage/LargeVideoModal.tsx") as Promise<{
+        default: ErasedModalComponent;
+      }>,
   },
 };

@@ -6,60 +6,66 @@
 @layer base {
   :root {
     --c-bg: #0a0a0a;
-    --c-surface: rgba(255,255,255,0.03);
-    --c-surface-alt: rgba(255,255,255,0.02);
+    --c-surface: rgba(255, 255, 255, 0.03);
+    --c-surface-alt: rgba(255, 255, 255, 0.02);
     --c-elevated: #121212;
-    --c-hover: rgba(255,255,255,0.06);
-    --c-btn: rgba(255,255,255,0.10);
-    --c-btn-hover: rgba(255,255,255,0.15);
-    --c-border: rgba(255,255,255,0.06);
-    --c-border-light: rgba(255,255,255,0.04);
-    --c-text: rgba(255,255,255,0.90);
-    --c-text-secondary: rgba(255,255,255,0.60);
-    --c-text-tertiary: rgba(255,255,255,0.30);
-    --c-accent: #60A5FA;
-    --c-accent-bg: rgba(96,165,250,0.12);
-    --c-accent-ring: rgba(96,165,250,0.20);
-    --c-success: #34D399;
-    --c-success-bg: rgba(52,211,153,0.10);
-    --c-success-ring: rgba(52,211,153,0.15);
-    --c-error: #F87171;
-    --c-error-bg: rgba(248,113,113,0.10);
-    --c-error-ring: rgba(248,113,113,0.15);
+    --c-hover: rgba(255, 255, 255, 0.06);
+    --c-btn: rgba(255, 255, 255, 0.1);
+    --c-btn-hover: rgba(255, 255, 255, 0.15);
+    --c-border: rgba(255, 255, 255, 0.06);
+    --c-border-light: rgba(255, 255, 255, 0.04);
+    --c-text: rgba(255, 255, 255, 0.9);
+    --c-text-secondary: rgba(255, 255, 255, 0.6);
+    --c-text-tertiary: rgba(255, 255, 255, 0.3);
+    --c-accent: #60a5fa;
+    --c-accent-bg: rgba(96, 165, 250, 0.12);
+    --c-accent-ring: rgba(96, 165, 250, 0.2);
+    --c-success: #34d399;
+    --c-success-bg: rgba(52, 211, 153, 0.1);
+    --c-success-ring: rgba(52, 211, 153, 0.15);
+    --c-error: #f87171;
+    --c-error-bg: rgba(248, 113, 113, 0.1);
+    --c-error-ring: rgba(248, 113, 113, 0.15);
     color-scheme: dark;
   }
 
   .light {
-    --c-bg: #FDFBF7;
-    --c-surface: rgba(0,0,0,0.04);
-    --c-surface-alt: rgba(0,0,0,0.02);
-    --c-elevated: #FFFFFF;
-    --c-hover: rgba(0,0,0,0.05);
-    --c-btn: rgba(0,0,0,0.06);
-    --c-btn-hover: rgba(0,0,0,0.10);
-    --c-border: rgba(0,0,0,0.08);
-    --c-border-light: rgba(0,0,0,0.05);
-    --c-text: rgba(0,0,0,0.85);
-    --c-text-secondary: rgba(0,0,0,0.55);
-    --c-text-tertiary: rgba(0,0,0,0.30);
-    --c-accent: #2563EB;
-    --c-accent-bg: rgba(37,99,235,0.10);
-    --c-accent-ring: rgba(37,99,235,0.18);
+    --c-bg: #fdfbf7;
+    --c-surface: rgba(0, 0, 0, 0.04);
+    --c-surface-alt: rgba(0, 0, 0, 0.02);
+    --c-elevated: #ffffff;
+    --c-hover: rgba(0, 0, 0, 0.05);
+    --c-btn: rgba(0, 0, 0, 0.06);
+    --c-btn-hover: rgba(0, 0, 0, 0.1);
+    --c-border: rgba(0, 0, 0, 0.08);
+    --c-border-light: rgba(0, 0, 0, 0.05);
+    --c-text: rgba(0, 0, 0, 0.85);
+    --c-text-secondary: rgba(0, 0, 0, 0.55);
+    --c-text-tertiary: rgba(0, 0, 0, 0.3);
+    --c-accent: #2563eb;
+    --c-accent-bg: rgba(37, 99, 235, 0.1);
+    --c-accent-ring: rgba(37, 99, 235, 0.18);
     --c-success: #059669;
-    --c-success-bg: rgba(5,150,105,0.10);
-    --c-success-ring: rgba(5,150,105,0.15);
-    --c-error: #DC2626;
-    --c-error-bg: rgba(220,38,38,0.08);
-    --c-error-ring: rgba(220,38,38,0.12);
+    --c-success-bg: rgba(5, 150, 105, 0.1);
+    --c-success-ring: rgba(5, 150, 105, 0.15);
+    --c-error: #dc2626;
+    --c-error-bg: rgba(220, 38, 38, 0.08);
+    --c-error-ring: rgba(220, 38, 38, 0.12);
     color-scheme: light;
   }
 
   body {
     @apply bg-[--c-bg] text-[--c-text] antialiased;
-    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    font-family:
+      "Plus Jakarta Sans",
+      system-ui,
+      -apple-system,
+      sans-serif;
   }
 
-  select { @apply appearance-none; }
+  select {
+    @apply appearance-none;
+  }
 
   /* Plyr fill container */
   .plyr-fill .plyr,
@@ -71,7 +77,16 @@
 }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: var(--c-hover); }
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--c-border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--c-hover);
+}

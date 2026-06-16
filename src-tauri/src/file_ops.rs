@@ -1,8 +1,37 @@
+use crate::state::AppState;
 use crate::types::FileInfo;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, State};
+
+fn sanitize_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("非法文件 ID".to_string());
+    }
+    Ok(())
+}
+
+fn normalize_path(path: &str) -> Result<PathBuf, String> {
+    Path::new(path)
+        .canonicalize()
+        .map_err(|e| format!("路径无效: {e}"))
+}
+
+fn subtitles_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取数据目录: {e}"))?;
+    let subtitles_dir = dir.join("subtitles");
+    fs::create_dir_all(&subtitles_dir).map_err(|e| format!("无法创建字幕目录: {e}"))?;
+    Ok(subtitles_dir)
+}
 
 fn api_key_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -67,8 +96,45 @@ pub fn get_file_info(path: String) -> Result<FileInfo, String> {
 }
 
 #[tauri::command]
+pub fn create_temp_media_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ext: String,
+) -> Result<String, String> {
+    let clean_ext = ext.trim_start_matches('.').to_ascii_lowercase();
+    if clean_ext.is_empty()
+        || clean_ext.len() > 8
+        || !clean_ext.chars().all(|c| c.is_ascii_alphanumeric())
+    {
+        return Err("非法临时文件扩展名".to_string());
+    }
+
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("无法获取缓存目录: {e}"))?
+        .join("media-temp");
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建临时目录: {e}"))?;
+    let dir = dir
+        .canonicalize()
+        .map_err(|e| format!("临时目录无效: {e}"))?;
+    let file_name = format!(
+        "{}_{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("系统时间异常: {e}"))?
+            .as_millis(),
+        clean_ext
+    );
+    let path = dir.join(file_name);
+    state.register_temp_file(path.clone());
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub fn reveal_in_folder(path: String) -> Result<(), String> {
-    if !fs::metadata(&path).is_ok() {
+    if fs::metadata(&path).is_err() {
         return Err(format!("文件不存在: {path}"));
     }
     #[cfg(target_os = "macos")]
@@ -101,26 +167,69 @@ pub fn reveal_in_folder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn write_subtitle_file(app: AppHandle, id: String, content: String) -> Result<String, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取数据目录: {e}"))?;
-    let subtitles_dir = dir.join("subtitles");
-    fs::create_dir_all(&subtitles_dir).map_err(|e| format!("无法创建字幕目录: {e}"))?;
+    sanitize_id(&id)?;
+    let subtitles_dir = subtitles_dir(&app)?;
     let file_path = subtitles_dir.join(format!("{}.srt", id));
     fs::write(&file_path, &content).map_err(|e| format!("无法写入字幕文件: {e}"))?;
     Ok(file_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub fn delete_file(path: String) -> Result<(), String> {
-    if fs::metadata(&path).is_ok() {
-        fs::remove_file(&path).map_err(|e| format!("删除文件失败: {e}"))?;
+pub fn delete_file(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let normalized = normalize_path(&path)?;
+    if !state.take_temp_file(&normalized) {
+        return Err("拒绝删除未登记的临时文件".to_string());
+    }
+    if fs::metadata(&normalized).is_ok() {
+        fs::remove_file(&normalized).map_err(|e| format!("删除文件失败: {e}"))?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn delete_subtitle_file(path: String) -> Result<(), String> {
-    delete_file(path)
+pub fn delete_subtitle_file(app: AppHandle, path: String) -> Result<(), String> {
+    let normalized = normalize_path(&path)?;
+    let dir = subtitles_dir(&app)?
+        .canonicalize()
+        .map_err(|e| format!("字幕目录无效: {e}"))?;
+    if !normalized.starts_with(&dir) {
+        return Err("拒绝删除应用字幕目录之外的文件".to_string());
+    }
+    if normalized.extension().and_then(|e| e.to_str()) != Some("srt") {
+        return Err("只允许删除 SRT 字幕文件".to_string());
+    }
+    if fs::metadata(&normalized).is_ok() {
+        fs::remove_file(&normalized).map_err(|e| format!("删除字幕文件失败: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_task(state: State<'_, AppState>, task_id: String) -> Result<(), String> {
+    state.cancel_task(&task_id);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_id;
+
+    #[test]
+    fn accepts_safe_subtitle_ids() {
+        assert!(sanitize_id("abc-123_DEF").is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_or_path_like_subtitle_ids() {
+        assert!(sanitize_id("").is_err());
+        assert!(sanitize_id("../escape").is_err());
+        assert!(sanitize_id("nested/path").is_err());
+        assert!(sanitize_id("with space").is_err());
+    }
+
+    #[test]
+    fn rejects_overly_long_subtitle_ids() {
+        let id = "a".repeat(129);
+        assert!(sanitize_id(&id).is_err());
+    }
 }

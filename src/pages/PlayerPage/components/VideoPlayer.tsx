@@ -52,9 +52,24 @@ export default function VideoPlayer({ entry, vttBlobUrl, onError, onClearError }
     container.appendChild(video);
 
     const player = new Plyr(video, {
-      controls: ["play-large", "play", "progress", "current-time", "mute", "volume", "captions", "settings", "pip", "fullscreen"],
+      controls: [
+        "play-large",
+        "play",
+        "progress",
+        "current-time",
+        "mute",
+        "volume",
+        "captions",
+        "settings",
+        "pip",
+        "fullscreen",
+      ],
       captions: { active: hasSubtitles, language: "auto", update: true },
-      i18n: { captions: "字幕", enableCaptions: "开启字幕", disableCaptions: "关闭字幕" as any },
+      i18n: {
+        captions: "字幕",
+        enableCaptions: "开启字幕",
+        disableCaptions: "关闭字幕",
+      } as Partial<Plyr.Options["i18n"]>,
       ratio: "16:9",
     });
 
@@ -62,13 +77,23 @@ export default function VideoPlayer({ entry, vttBlobUrl, onError, onClearError }
       if (hasSubtitles) player.toggleCaptions(true);
       const btn = container.querySelector("[data-plyr='captions']") as HTMLElement | null;
       if (btn) {
-        const on = () => { btn.style.fontWeight = "600"; btn.style.color = "var(--c-accent, #60A5FA)"; };
-        const off = () => { btn.style.fontWeight = "400"; btn.style.color = "var(--c-text-secondary, rgba(255,255,255,0.6))"; };
-        hasSubtitles ? on() : off();
+        const on = () => {
+          btn.style.fontWeight = "600";
+          btn.style.color = "var(--c-accent, #60A5FA)";
+        };
+        const off = () => {
+          btn.style.fontWeight = "400";
+          btn.style.color = "var(--c-text-secondary, rgba(255,255,255,0.6))";
+        };
+        if (hasSubtitles) on();
+        else off();
         player.on("captionsenabled", on);
         player.on("captionsdisabled", off);
         for (const c of btn.childNodes) {
-          if (c.nodeType === 3 && c.textContent?.trim() === "CC") { c.textContent = "字幕"; break; }
+          if (c.nodeType === 3 && c.textContent?.trim() === "CC") {
+            c.textContent = "字幕";
+            break;
+          }
         }
       }
     });
@@ -80,10 +105,18 @@ export default function VideoPlayer({ entry, vttBlobUrl, onError, onClearError }
 
     playerRef.current = player;
 
-    return () => { player.destroy(); playerRef.current = null; };
+    return () => {
+      player.destroy();
+      playerRef.current = null;
+    };
   }, [assetUrl, vttBlobUrl, hasSubtitles, targetLang, onError, onClearError]);
 
-  useEffect(() => () => { playerRef.current?.destroy(); }, []);
+  useEffect(
+    () => () => {
+      playerRef.current?.destroy();
+    },
+    [],
+  );
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -100,9 +133,13 @@ export default function VideoPlayer({ entry, vttBlobUrl, onError, onClearError }
         <Icon name="video" className="w-4 h-4 text-app-text-secondary flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="text-sm text-app-text truncate">{entry.videoName}</p>
-          <p className="text-[10px] text-app-text-tertiary">{entry.sourceLang} → {entry.targetLang} · {entry.subtitles.length} 条字幕</p>
+          <p className="text-[10px] text-app-text-tertiary">
+            {entry.sourceLang} → {entry.targetLang} · {entry.subtitles.length} 条字幕
+          </p>
         </div>
-        <span className="text-[10px] text-app-text-tertiary">{entry.mode === "video" ? "视频模式" : "音频模式"}</span>
+        <span className="text-[10px] text-app-text-tertiary">
+          {entry.mode === "video" ? "视频模式" : "音频模式"}
+        </span>
       </div>
     </div>
   );

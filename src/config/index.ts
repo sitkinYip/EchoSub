@@ -37,6 +37,21 @@ export const NAV_ITEMS: { path: string; label: string; icon: IconName }[] = [
 ];
 
 export type IconName =
-  | "logo" | "translate" | "history" | "player" | "settings" | "download"
-  | "arrow-right" | "check" | "close" | "video" | "chevron-right"
-  | "upload" | "chat" | "spinner" | "moon" | "sun" | "warning" | "help";
+  | "logo"
+  | "translate"
+  | "history"
+  | "player"
+  | "settings"
+  | "download"
+  | "arrow-right"
+  | "check"
+  | "close"
+  | "video"
+  | "chevron-right"
+  | "upload"
+  | "chat"
+  | "spinner"
+  | "moon"
+  | "sun"
+  | "warning"
+  | "help";

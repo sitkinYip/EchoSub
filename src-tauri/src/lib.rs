@@ -1,9 +1,10 @@
 // ── Modules ──
-mod types;
-mod prompt;
 mod file_ops;
 mod oss;
+mod prompt;
+mod state;
 mod translate;
+mod types;
 
 // ── Debug macro (strips to nothing in release) ──
 macro_rules! debug {
@@ -19,6 +20,7 @@ pub(crate) use debug;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(state::AppState::default())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -30,8 +32,10 @@ pub fn run() {
             file_ops::write_subtitle_file,
             file_ops::delete_subtitle_file,
             file_ops::delete_file,
+            file_ops::create_temp_media_path,
             file_ops::save_api_key,
             file_ops::load_api_key,
+            file_ops::cancel_task,
             oss::upload_to_dashscope_oss,
             translate::stream_translate
         ])

@@ -13,17 +13,27 @@ export interface MediaMeta {
 export async function probe(filePath: string): Promise<MediaMeta> {
   const result: MediaMeta = { width: 1920, height: 1080, durationSeconds: 0, size: 0 };
   try {
-    const info = await invoke("get_file_info", { path: filePath }).catch(() => ({ size: 0 })) as { size: number };
+    const info = (await invoke("get_file_info", { path: filePath }).catch(() => ({ size: 0 }))) as {
+      size: number;
+    };
     result.size = info.size;
     const cmd = Command.sidecar("binaries/ffmpeg", ["-i", filePath]);
     let stderr = "";
-    cmd.stderr.on("data", (d: string) => { stderr += d; });
+    cmd.stderr.on("data", (d: string) => {
+      stderr += d;
+    });
     await cmd.execute().catch(() => {});
     const resMatch = stderr.match(/(\d{2,4})x(\d{2,4})/);
-    if (resMatch) { result.width = parseInt(resMatch[1], 10); result.height = parseInt(resMatch[2], 10); }
+    if (resMatch) {
+      result.width = parseInt(resMatch[1], 10);
+      result.height = parseInt(resMatch[2], 10);
+    }
     const durMatch = stderr.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
     if (durMatch) {
-      result.durationSeconds = parseInt(durMatch[1], 10) * 3600 + parseInt(durMatch[2], 10) * 60 + parseInt(durMatch[3], 10);
+      result.durationSeconds =
+        parseInt(durMatch[1], 10) * 3600 +
+        parseInt(durMatch[2], 10) * 60 +
+        parseInt(durMatch[3], 10);
     }
   } catch (err) {
     console.warn("[probe] 文件探测失败:", err);

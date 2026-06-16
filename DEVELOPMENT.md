@@ -1,351 +1,309 @@
-# EchoSub 前端开发规范
+# EchoSub 开发规范
 
-## 0. 技术栈
+这份文档面向日常开发。更完整的系统架构、事件流和文件位置见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+
+## 1. 技术栈
 
 | 层级 | 选型 |
-|------|------|
-| 框架 | React 18 + TypeScript (strict) |
-| 构建 | Vite 5 + Tauri v2 |
-| 路由 | react-router-dom v6 (HashRouter) |
+| --- | --- |
+| 桌面 | Tauri v2 |
+| Rust | tokio, reqwest, tauri plugins |
+| 前端 | React 18 + TypeScript strict + Vite |
+| 路由 | react-router-dom v6 HashRouter |
 | 状态 | Zustand |
-| 样式 | Tailwind CSS 3 + CSS 自定义属性 |
-| 持久化 | `@tauri-apps/plugin-store` |
+| 样式 | Tailwind CSS 3 + CSS variables |
+| 存储 | tauri-plugin-store + Rust app data/cache files |
+| 测试 | Vitest, cargo test |
+| 质量 | ESLint, Prettier, cargo fmt, cargo clippy |
 
----
+## 2. 常用命令
 
-## 1. 目录结构
-
+```bash
+npm run tauri dev
+npm run build
+npm run test
+npm run lint
+npm run format:check
+npm run format
+cd src-tauri && cargo test
+cd src-tauri && cargo fmt --check
+cd src-tauri && cargo clippy -- -D warnings
+npm run tauri -- build --no-bundle
 ```
+
+提交前至少跑：
+
+```bash
+npm run lint
+npm run format:check
+npm run test
+npm run build
+cd src-tauri && cargo test
+cd src-tauri && cargo clippy -- -D warnings
+```
+
+## 3. 目录结构
+
+```text
 src/
-├── main.tsx                  # ReactDOM 入口
-├── App.tsx                   # Router 配置
-├── index.css                 # 全局样式 + 主题变量
-├── vite-env.d.ts
-├── config/                   # 全局配置常量
-│   ├── index.ts              # 语言、步骤、导航、文件扩展名等
-│   └── theme.ts              # Theme 类型定义 & 标签
-├── types/
-│   └── index.ts              # 全项目共享类型
-├── utils/
-│   └── srtParser.ts          # 纯函数工具
-├── stores/                   # Zustand stores
-│   ├── settingsStore.ts      # 用户设置（含主题）
-│   └── translationStore.ts   # 翻译全流程 + 历史记录
-├── components/               # 全局共享组件
-│   ├── Icon/
-│   │   └── index.tsx         # 统一图标组件，<Icon name="..." />
-│   ├── DropZone/
-│   │   └── index.tsx
-│   ├── ExportButton/
-│   │   └── index.tsx
-│   ├── SubtitlePreview/
-│   │   └── index.tsx
-│   ├── ProcessingPanel/
-│   │   └── index.tsx
-│   ├── ApiKeyModal/
-│   │   └── index.tsx
-│   ├── SettingsPopover/
-│   │   └── index.tsx
-│   ├── LangSelect/
-│   │   └── index.tsx
-│   └── FilePill/
-│       └── index.tsx
+├── App.tsx
+├── main.tsx
+├── index.css
+├── components/
+├── config/
 ├── layouts/
-│   └── RootLayout.tsx        # 侧边栏 + Outlet
-└── pages/                    # 路由页面
-    ├── TranslatePage/
-    │   └── index.tsx         # 翻译主页面
-    ├── HistoryPage/
-    │   └── index.tsx
-    └── PlayerPage/
-        └── index.tsx
+├── pages/
+│   ├── TranslatePage/
+│   ├── HistoryPage/
+│   └── PlayerPage/
+├── services/
+├── stores/
+├── test/
+├── types/
+└── utils/
+
+src-tauri/
+├── Cargo.toml
+├── tauri.conf.json
+├── capabilities/default.json
+└── src/
+    ├── lib.rs
+    ├── file_ops.rs
+    ├── oss.rs
+    ├── translate.rs
+    ├── prompt.rs
+    ├── state.rs
+    └── types.rs
 ```
 
-## 2. 组件规范
+## 4. 前端分层
 
-### 2.1 每个组件独立文件夹
+### 4.1 Pages
 
+页面只负责用户交互和页面组合。
+
+- `TranslatePage`：导入文件、选择语言/模式、展示处理进度和预览。
+- `HistoryPage`：历史记录、编辑、导出、重新生成。
+- `PlayerPage`：选择历史记录并播放原视频 + VTT 字幕。
+
+页面不要直接实现长任务细节。涉及 FFmpeg、上传、翻译、历史落盘的逻辑放到 `services/` 和 `stores/`。
+
+### 4.2 Stores
+
+| Store | 职责 |
+| --- | --- |
+| `settingsStore` | API Key、语言、上传模式、主题，负责加载/保存设置。 |
+| `translationStore` | 当前翻译任务 UI 状态，暴露 `startPipeline/reset/cancel/updateSubtitleText`。 |
+| `historyStore` | 历史记录、字幕编辑、删除、清空、保存历史。 |
+| `modalStore` | 命令式弹窗队列和动画状态。 |
+| `messageStore` | Toast 消息队列。 |
+
+Store 规则：
+
+- 组件通过 hook 读写 store。
+- 异步状态更新尽量放在 store action 或 service 中。
+- 历史记录保存失败必须反馈用户，不只写 console。
+- `translationStore` 不直接调用 Rust command；长任务委托给 `translateService`。
+
+### 4.3 Services
+
+| Service | 职责 |
+| --- | --- |
+| `translateService` | 主翻译管线编排：探测、提取/压缩、上传、翻译、解析、保存历史。 |
+| `pipelineSession` | 当前任务 session、`taskId`、取消、临时文件追踪、safe state update。 |
+| `ffmpegService` | 调用 FFmpeg sidecar，并将 stderr 解析成进度文本。 |
+| `mediaService` | 媒体 metadata 探测和压缩策略选择。 |
+| `historyService` | `history.json` 读写和保存队列。 |
+
+Service 规则：
+
+- `pipelineSession` 是唯一维护当前任务生命周期的地方。
+- 任何 Tauri event 都必须按 `taskId` 过滤，避免旧任务更新新任务 UI。
+- 临时文件路径必须通过 `create_temp_media_path` 生成，不能写到用户原视频目录旁边。
+- 模型输出解析失败时进入错误状态，不要生成 0 时长假字幕。
+
+## 5. Rust 分层
+
+| 文件 | 职责 |
+| --- | --- |
+| `lib.rs` | 初始化 Tauri、插件和 command 注册。 |
+| `file_ops.rs` | 文件信息、API Key、临时文件、字幕缓存、打开目录、取消任务 command。 |
+| `oss.rs` | DashScope OSS policy 获取和流式 multipart 上传。 |
+| `translate.rs` | DashScope chat completions SSE 请求和事件转发。 |
+| `prompt.rs` | 转录/翻译 prompt 构造。 |
+| `state.rs` | AppState：取消任务集合、登记过的临时文件集合。 |
+| `types.rs` | Rust command DTO 和 Tauri event payload。 |
+
+Rust 规则：
+
+- 自定义 command 不要对前端传入的任意路径直接执行删除。
+- `delete_file` 只删除 `AppState` 登记过的临时文件。
+- `delete_subtitle_file` 只删除 app subtitles 目录下的 `.srt`。
+- 大媒体文件不要 `fs::read` 一次性读入内存；上传必须流式。
+- 长任务必须检查 `AppState::is_cancelled(task_id)`。
+- 新增 command 后要同步更新 `ARCHITECTURE.md` 的 command 清单。
+
+## 6. Tauri Command 约定
+
+前端通过 `invoke` 调 Rust command。命名保持 snake_case。
+
+当前 command：
+
+- `get_file_info`
+- `reveal_in_folder`
+- `write_subtitle_file`
+- `delete_subtitle_file`
+- `delete_file`
+- `create_temp_media_path`
+- `save_api_key`
+- `load_api_key`
+- `cancel_task`
+- `upload_to_dashscope_oss`
+- `stream_translate`
+
+新增 command 时必须说明：
+
+- 参数结构。
+- 返回值。
+- 是否允许任意路径。
+- 是否受 `taskId` 控制。
+- 错误如何给前端展示。
+
+## 7. 事件约定
+
+Rust 通过 Tauri event 向前端推送翻译过程。
+
+事件名：
+
+- `translate-progress`
+- `translate-chunk`
+- `translate-error`
+- `translate-done`
+
+payload 格式：
+
+```ts
+type TaskEvent<T> = {
+  taskId: string;
+  payload: T;
+};
 ```
-ComponentName/
-└── index.tsx    # 入口文件，export default
+
+前端 listener 必须先判断 `payload.taskId === currentSession.taskId`，再更新 UI。
+
+## 8. 组件规范
+
+### 8.1 组件目录
+
+共享组件使用独立文件夹：
+
+```text
+components/ComponentName/index.tsx
 ```
 
-- 后续可按需添加：`constants.ts`（组件专属常量）、`utils.ts`（组件专属工具）、`ComponentName.module.css`、`__tests__/`
-- **不要**把多个不相关的组件放同一个文件
-- **不要**在 tsx 里定义内联组件（除非是 10 行以内的纯 UI 辅助函数）
+页面专属组件放在页面目录下：
 
-### 2.2 组件命名
+```text
+pages/HistoryPage/HistoryCard.tsx
+pages/PlayerPage/components/VideoPlayer.tsx
+```
 
-- 文件夹：`PascalCase`
-- 默认导出组件名 = 文件夹名
-- Props interface 命名为 `Props`（局部）或导出为 `ComponentNameProps`
+### 8.2 Props 和导出
+
+- 函数组件使用 `export default function ComponentName(...)`。
+- Props 用局部 `interface Props`。
+- 不使用 `React.FC`。
+- 避免 `any`；需要擦除动态类型时用 `unknown` 或局部 type guard。
+
+### 8.3 图标
+
+统一使用：
 
 ```tsx
-// components/ExportButton/index.tsx
-interface Props {
-  items: SubtitleItem[];
-  disabled?: boolean;
-  videoFileName?: string;
-}
-
-export default function ExportButton({ items, disabled, videoFileName }: Props) {
-  // ...
-}
-```
-
-### 2.3 图标使用
-
-```tsx
-import Icon from "../components/Icon";
+import Icon from "@/components/Icon";
 <Icon name="download" className="w-4 h-4" />
 ```
 
-- 可用图标名见 `config/index.ts` → `IconName` 类型
-- 新增图标：在 `components/Icon/index.tsx` 的 `PATHS` 对象中追加，同时在 `config/index.ts` 的 `IconName` 联合类型中注册
-- **禁止**在组件里写 inline `<svg>`，全部走 Icon 组件
+新增图标时同步更新：
 
-### 2.4 页面也走文件夹
+- `src/config/index.ts` 的 `IconName`
+- `src/components/Icon/index.tsx` 的 `PATHS`
 
-```
-pages/MyPage/index.tsx
-```
+## 9. 样式规范
 
-页面目录可容纳专属子组件，例如：
+颜色使用 Tailwind `app-*` token，不在组件里硬编码具体颜色。
 
-```
-pages/HistoryPage/
-├── index.tsx
-├── HistoryCard.tsx     # 未来
-└── useHistoryFilter.ts # 未来
-```
+常用 token：
 
-## 3. 样式规范
+- `bg-app-bg`
+- `bg-app-surface`
+- `bg-app-surface-alt`
+- `bg-app-elevated`
+- `bg-app-hover`
+- `text-app-text`
+- `text-app-text-secondary`
+- `text-app-text-tertiary`
+- `border-app-border`
+- `border-app-border-light`
+- `text-app-accent`
+- `text-app-success`
+- `text-app-error`
 
-### 3.1 主题变量（禁止硬编码颜色）
-
-所有颜色统一使用 Tailwind `app-*` token：
-
-| Token | 用途 |
-|-------|------|
-| `bg-app-bg` | 页面最底层背景 |
-| `bg-app-surface` | 卡片/输入框背景 |
-| `bg-app-surface-alt` | 次要表面 |
-| `bg-app-elevated` | 弹窗/浮层背景 |
-| `bg-app-hover` | hover 态 |
-| `bg-app-btn` | 按钮默认背景 |
-| `bg-app-btn-hover` | 按钮 hover |
-| `text-app-text` | 主要文字 |
-| `text-app-text-secondary` | 次要文字 |
-| `text-app-text-tertiary` | 辅助文字/placeholder |
-| `border-app-border` | 默认边框 |
-| `border-app-border-light` | 细边框 |
-| `ring-app-border` | 等同边框 ring |
-| `bg-app-accent-bg` | 强调色浅底 |
-| `text-app-accent` | 强调色文字/图标 |
-| `ring-app-accent-ring` | 强调色 ring |
-| `bg-app-success-bg` | 成功浅底 |
-| `text-app-success` | 成功文字/图标 |
-| `ring-app-success-ring` | 成功 ring |
-| `bg-app-error-bg` | 错误浅底 |
-| `text-app-error` | 错误文字/图标 |
-| `ring-app-error-ring` | 错误 ring |
-
-**规则：**
-- **绝不**在 className 里写 `white/`、`black/`、`blue-`、`red-`、`emerald-` 等颜色值
-- **绝不**写硬编码 hex 色 `#0a0a0a`、`#121212` 等
-- 修改主题只需改 `src/index.css` 的 CSS 变量
-
-### 3.2 过渡 & 动效
+动效：
 
 ```css
-/* 统一 cubic-bezier */
 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]
 ```
 
-- 按钮点击：`active:scale-[0.97]` 或 `active:scale-95`
-- 不使用 `linear` 或 `ease-in-out`
-- 状态切换必须过渡，不允许瞬间变化
+圆角约定：
 
-### 3.3 圆角
-
-- 卡片/面板：`rounded-2xl`
+- 面板/卡片：`rounded-2xl`
 - 按钮/输入框：`rounded-xl`
-- 大区域（dropzone）：`rounded-3xl`
-- 弹窗模态框：`rounded-2xl`
+- 大 dropzone：`rounded-3xl`
 
-### 3.4 字体
+## 10. Modal 和 Toast
 
-全局单一字体栈：`"Plus Jakarta Sans", system-ui, -apple-system, sans-serif`
+Modal 使用注册制：
 
-## 4. 配置管理
+- 注册表：`src/config/modals.ts`
+- Store：`src/stores/modalStore.ts`
+- 调用：`showModal(name, data, config)`
+- Renderer：`src/components/Modal/index.tsx`
 
-### 4.1 config/index.ts
+内容组件只渲染内容，不渲染遮罩和外层容器。
 
-存放**不依赖 React 上下文**的常量和枚举：
-
-- 语言列表、视频扩展名、文件大小上限
-- 处理步骤定义
-- 导航项配置
-- IconName 类型
-
-### 4.2 config/theme.ts
-
-存放主题相关类型定义。
-
-### 4.3 何时放 config vs types
-
-| 放 `config/` | 放 `types/` |
-|-------------|------------|
-| 常量值、枚举值 | 纯类型/interface |
-| 运行时会引用的数组/对象 | 只用于 TS 编译时 |
-
-## 5. 状态管理
-
-### 5.1 Store 划分
-
-| Store | 职责 |
-|-------|------|
-| `settingsStore` | apiKey、语言、上传模式、**主题** — 持久化到 `config.json` |
-| `translationStore` | 翻译全流程状态 + 历史记录 — 翻译结果持久化到 `history.json` |
-| `modalStore` | 命令式弹窗队列，show / close / 动画编排 |
-
-### 5.2 Store 编写规范
-
-- 每个 store 一个文件，`create<State & Actions>((set, get) => ({}))`
-- 异步操作（load、save、API 调用）放在 store 的 action 中
-- 组件 **只通过 hook** 读写 store，不直接 import `Store.load()`
-- Store 内部使用 `get()` 读取实时状态（避免闭包过期）
-- 模块级私有变量（非 reactive）用 `let` 定义在 store 文件顶部
-
-### 5.3 组件内使用
-
-```tsx
-const apiKey = useSettingsStore((s) => s.apiKey);       // 精确选择
-const { apiKey, sourceLang, update } = useSettingsStore(); // 多字段解构
-```
-
-## 6. 路由
-
-- 使用 `HashRouter`（Tauri 环境必需）
-- 路由配置集中在 `App.tsx`
-- 页面通过 `<Outlet />` 在 `RootLayout` 中渲染
-- 新增页面路径时在 `config/index.ts` 的 `NAV_ITEMS` 中注册
-
-## 7. 代码风格
-
-### 7.1 Import 顺序
-
-1. React / 第三方
-2. Tauri 插件
-3. 本地组件
-4. Stores
-5. Config / Types / Utils
-6. 类型导入单独一行 `import type { ... }`
-
-### 7.2 函数组件
-
-- 一律 `export default function ComponentName()`
-- 不使用 `React.FC` 类型标注
-- Props 用解构 + interface
-
-### 7.3 禁止事项
-
-- 不在 tsx 中定义常量数组/对象（提取到 `config/` 或组件文件夹内的 constants）
-- 不在组件文件中写 SVG path 字符串（走 Icon 组件）
-- 不复制粘贴 parser/工具函数（统一引用 `utils/srtParser.ts`）
-- 不保留未使用的 type/interface（已在 `types/index.ts` 中清除）
-- 不留空的 hooks 目录
-
-## 8. 命令式弹窗系统
-
-所有弹窗通过**注册制 + 命令式调用**管理，无需在 JSX 中声明。
-
-### 8.1 调用方式
+Toast 使用：
 
 ```ts
-import { showModal, closeModal } from "../components/Modal/create";
-
-// 打开弹窗
-showModal("ApiKey", { someData: 42 }, { maskClosable: true });
-
-// 关闭顶层弹窗
-closeModal();
-
-// 关闭指定弹窗（传入实例 id）
-closeModal("modal_3");
+showMessage({
+  type: "error",
+  title: "保存失败",
+  description: "请稍后重试",
+});
 ```
 
-### 8.2 注册新弹窗
+## 11. 测试要求
 
-**Step 1:** 在 `config/modals.ts` → `ModalName` 枚举中新增名称。
+优先测试纯逻辑和任务生命周期：
 
-**Step 2:** 在同文件 `MODAL_REGISTRY` 中注册默认配置 + 组件加载器：
+- `utils/srtParser.test.ts`
+- `services/pipelineSession.test.ts`
+- Rust `prompt.rs` tests
+- Rust `file_ops.rs` tests
 
-```ts
-[ModalName.MyModal]: {
-  defaults: { maskClosable: true, showClose: true, width: "md" },
-  loader: () => import("../components/MyModal/index.tsx"),
-},
-```
+新增以下逻辑时应补测试：
 
-**Step 3:** 编写内容组件，接收 `ModalContentProps`：
+- SRT/VTT 解析或序列化。
+- 任务取消、临时文件清理、旧任务事件过滤。
+- 历史记录保存和迁移。
+- Rust 文件路径校验。
+- Prompt 关键输出约束。
 
-```tsx
-import type { ModalContentProps } from "../../config/modals";
+## 12. 格式化和 Lint
 
-interface MyData { title: string; }
+- JS/TS/JSON/CSS 使用 Prettier。
+- Rust 使用 `cargo fmt`。
+- JS/TS 使用 ESLint。
+- Rust 使用 clippy 且要求 `-D warnings`。
 
-export default function MyModal({ close, data }: ModalContentProps<MyData>) {
-  return (
-    <div>
-      <h2>{data.title}</h2>
-      <button onClick={close}>关闭</button>
-    </div>
-  );
-}
-```
-
-### 8.3 关键规则
-
-- 内容组件 **不渲染遮罩/容器**（由 Modal 组件统一处理）
-- 内容组件通过 `close()` 关闭自己
-- 内容组件可自由使用 Zustand stores
-- Modal 名从 `ModalName` 枚举取值，确保类型安全
-- 弹窗叠加：后打开的叠在上层，关闭上层后下层自动显示
-
-### 8.4 配置项
-
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `maskClosable` | `true` | 点击遮罩是否关闭 |
-| `showClose` | `true` | 是否显示右上角 X 按钮 |
-| `width` | `"sm"` | 面板宽度：`sm` / `md` / `lg` |
-
-### 8.5 动画
-
-进入：遮罩 fade in + 面板 scale(0.95)→scale(1) + translateY(4px)→0 + opacity 0→1
-
-退出：反向 300ms cubic-bezier(0.32, 0.72, 0, 1)
-
-## 9. 类型管理
-
-`src/types/index.ts` 定义全项目共享类型：
-
-- `SubtitleItem` — 字幕条目
-- `Language` — 语言
-- `VideoFile` — 文件信息
-- `HistoryEntry` — 历史记录
-
-删除原则：TS 编译通过后，检查 types 中各类型是否有引用，未引用的立即删除。
-
-## 10. 新功能 Checklist
-
-开发新功能时的检查点：
-
-- [ ] 新增的常量/枚举在 `config/` 中定义
-- [ ] 新增的图标在 `Icon/index.tsx` + `IconName` 类型中注册
-- [ ] 颜色全部使用 `app-*` token
-- [ ] 组件独立文件夹，入口为 `index.tsx`
-- [ ] 页面状态优先考虑放 store（如需跨 tab 保留）
-- [ ] 类型放到 `types/index.ts` 或组件内 `interface Props`
-- [ ] `npm run tauri build` 通过
+不要为了通过 lint 引入宽泛 `any` 或静默吞错。确实需要动态类型时，优先写局部类型、type guard 或 `unknown`。

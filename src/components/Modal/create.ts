@@ -7,11 +7,7 @@ import type { ModalConfig } from "@/config/modals";
  * @param data  透传给弹窗内容组件的数据
  * @param config 可覆盖注册时默认配置
  */
-export function showModal<D = unknown>(
-  name: string,
-  data?: D,
-  config?: Partial<ModalConfig>
-) {
+export function showModal<D = unknown>(name: string, data?: D, config?: Partial<ModalConfig>) {
   useModalStore.getState().show(name, data, config);
 }
 

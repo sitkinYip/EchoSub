@@ -15,9 +15,9 @@ export type PlayerAction =
 
 /** Key → action mappings.  Configurable per-view / per-locale. */
 export interface KeyMapping {
-  keys: string[];           // e.key values, e.g. [" ", "k"]
+  keys: string[]; // e.key values, e.g. [" ", "k"]
   action: PlayerAction;
-  label: string;            // shown in tooltip / overlay
+  label: string; // shown in tooltip / overlay
 }
 
 export const DEFAULT_MAPPINGS: KeyMapping[] = [

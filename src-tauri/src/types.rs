@@ -5,9 +5,17 @@ pub struct FileInfo {
     pub size: u64,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskEvent<T: Serialize + Clone> {
+    pub task_id: String,
+    pub payload: T,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslateRequest {
+    pub task_id: String,
     pub oss_url: String,
     pub api_key: String,
     pub media_type: String,

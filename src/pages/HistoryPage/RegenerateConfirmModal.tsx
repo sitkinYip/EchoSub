@@ -43,7 +43,9 @@ export default function RegenerateConfirmModal({ close, data }: ModalContentProp
             <Icon name="close" className="w-4 h-4 text-app-error flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-sm text-app-error font-medium">文件已丢失</p>
-              <p className="text-xs text-app-text-tertiary mt-0.5">原视频文件已不存在或被移动，无法重新生成。</p>
+              <p className="text-xs text-app-text-tertiary mt-0.5">
+                原视频文件已不存在或被移动，无法重新生成。
+              </p>
             </div>
           </div>
         ) : (
@@ -58,10 +60,15 @@ export default function RegenerateConfirmModal({ close, data }: ModalContentProp
 
         {/* Language selectors */}
         <div>
-          <label className="block text-xs font-medium text-app-text-secondary mb-2 tracking-wide uppercase">翻译方向</label>
+          <label className="block text-xs font-medium text-app-text-secondary mb-2 tracking-wide uppercase">
+            翻译方向
+          </label>
           <div className="flex items-center gap-2">
             <LangSelect value={sourceLang} onChange={setSourceLang} options={LANGUAGES} />
-            <Icon name="chevron-right" className="w-3.5 h-3.5 text-app-text-tertiary flex-shrink-0" />
+            <Icon
+              name="chevron-right"
+              className="w-3.5 h-3.5 text-app-text-tertiary flex-shrink-0"
+            />
             <LangSelect value={targetLang} onChange={setTargetLang} options={LANGUAGES} />
           </div>
         </div>
@@ -76,16 +83,24 @@ export default function RegenerateConfirmModal({ close, data }: ModalContentProp
             onClick={() => setUploadVideo(!uploadVideo)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 transition-colors ${uploadVideo ? "bg-app-accent" : "bg-app-hover"}`}
           >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${uploadVideo ? "translate-x-6" : "translate-x-1"}`} />
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${uploadVideo ? "translate-x-6" : "translate-x-1"}`}
+            />
           </button>
         </div>
 
         <div className="flex gap-3 pt-1">
-          <button onClick={close} className="flex-1 px-4 py-2.5 rounded-xl bg-app-surface hover:bg-app-hover text-app-text-secondary transition-all text-sm font-medium active:scale-[0.98]">
+          <button
+            onClick={close}
+            className="flex-1 px-4 py-2.5 rounded-xl bg-app-surface hover:bg-app-hover text-app-text-secondary transition-all text-sm font-medium active:scale-[0.98]"
+          >
             取消
           </button>
-          <button onClick={handleConfirm} disabled={!data.exists}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-app-btn hover:bg-app-btn-hover disabled:bg-app-surface disabled:text-app-text-tertiary text-app-text transition-all text-sm font-medium active:scale-[0.98] disabled:cursor-not-allowed">
+          <button
+            onClick={handleConfirm}
+            disabled={!data.exists}
+            className="flex-1 px-4 py-2.5 rounded-xl bg-app-btn hover:bg-app-btn-hover disabled:bg-app-surface disabled:text-app-text-tertiary text-app-text transition-all text-sm font-medium active:scale-[0.98] disabled:cursor-not-allowed"
+          >
             确认开始
           </button>
         </div>

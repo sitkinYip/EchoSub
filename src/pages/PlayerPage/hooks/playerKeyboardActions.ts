@@ -7,7 +7,10 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function seekBy(player: Plyr, seconds: number) {
-  const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : Number.POSITIVE_INFINITY;
+  const duration =
+    Number.isFinite(player.duration) && player.duration > 0
+      ? player.duration
+      : Number.POSITIVE_INFINITY;
   const current = Number.isFinite(player.currentTime) ? player.currentTime : 0;
   player.currentTime = clamp(current + seconds, 0, duration);
 }

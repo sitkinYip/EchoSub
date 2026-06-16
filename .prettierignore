@@ -1,0 +1,9 @@
+dist
+node_modules
+src-tauri/target
+src-tauri/binaries
+package-lock.json
+Cargo.lock
+README.md
+DEVELOPMENT.md
+REVIEW_REPORT.md

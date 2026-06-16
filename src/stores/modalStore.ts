@@ -7,7 +7,7 @@ export interface ModalEntry {
   name: string;
   data: unknown;
   config: ModalConfig;
-  Component: ModalComponent<any> | null;
+  Component: ModalComponent<unknown> | null;
   /** 是否正在关闭（播放退场动画） */
   leaving: boolean;
 }
@@ -31,14 +31,20 @@ export const useModalStore = create<ModalState>((set, get) => ({
 
   show: async <D>(name: string, data?: D, config?: Partial<ModalConfig>) => {
     const entry = MODAL_REGISTRY[name as keyof typeof MODAL_REGISTRY];
-    if (!entry) { console.warn(`[Modal] 未注册的弹窗: ${name}`); return; }
+    if (!entry) {
+      console.warn(`[Modal] 未注册的弹窗: ${name}`);
+      return;
+    }
 
     const resolved: ModalConfig = { ...DEFAULT_MODAL_CONFIG, ...entry.defaults, ...config };
     const id = `modal_${++idCounter}`;
 
     // 先入队占位（Component 为 null），同时触发展示遮罩/骨架
     set((s) => ({
-      stack: [...s.stack, { id, name, data: data ?? {}, config: resolved, Component: null, leaving: false }],
+      stack: [
+        ...s.stack,
+        { id, name, data: data ?? {}, config: resolved, Component: null, leaving: false },
+      ],
     }));
 
     // 异步加载组件

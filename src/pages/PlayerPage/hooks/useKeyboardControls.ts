@@ -23,7 +23,12 @@ export function useKeyboardControls({
   mappings = DEFAULT_MAPPINGS,
   onAction,
 }: UseKeyboardControlsOptions) {
-  const longPressTimers = useRef(new Map<string, { delay: ReturnType<typeof setTimeout>; repeat?: ReturnType<typeof setInterval> }>());
+  const longPressTimers = useRef(
+    new Map<
+      string,
+      { delay: ReturnType<typeof setTimeout>; repeat?: ReturnType<typeof setInterval> }
+    >(),
+  );
   const keyToAction = useRef(new Map<string, PlayerAction>());
 
   const normalizeKey = useCallback((key: string) => {
@@ -65,7 +70,10 @@ export function useKeyboardControls({
       if (fastVariant && !e.repeat && !longPressTimers.current.has(e.key)) {
         const delay = setTimeout(() => {
           execute(fastVariant);
-          const repeat = setInterval(() => execute(fastVariant), PLAYER_KEYBOARD_LIMITS.fastSeekIntervalMs);
+          const repeat = setInterval(
+            () => execute(fastVariant),
+            PLAYER_KEYBOARD_LIMITS.fastSeekIntervalMs,
+          );
           const current = longPressTimers.current.get(e.key);
           if (current) longPressTimers.current.set(e.key, { ...current, repeat });
         }, PLAYER_KEYBOARD_LIMITS.longPressMs);

@@ -18,26 +18,42 @@ export default function PlayerPage() {
   const [loadError, setLoadError] = useState("");
   const blobRef = useRef("");
 
-  useEffect(() => { if (!historyLoaded) load(); }, []);
-  useEffect(() => () => { if (blobRef.current) URL.revokeObjectURL(blobRef.current); }, []);
+  useEffect(() => {
+    if (!historyLoaded) load();
+  }, []);
+  useEffect(
+    () => () => {
+      if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+    },
+    [],
+  );
 
   const completed = history.filter((e) => e.status === "completed" && e.subtitles.length > 0);
 
   const handleSelect = useCallback((entry: HistoryEntry) => {
-    invoke("get_file_info", { path: entry.videoPath }).then(() => {
-      if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = ""; }
-      setActiveEntry(entry);
-      setVttBlobUrl("");
-      setLoadError("");
+    invoke("get_file_info", { path: entry.videoPath })
+      .then(() => {
+        if (blobRef.current) {
+          URL.revokeObjectURL(blobRef.current);
+          blobRef.current = "";
+        }
+        setActiveEntry(entry);
+        setVttBlobUrl("");
+        setLoadError("");
 
-      const vtt = itemsToVtt(entry.subtitles);
-      const blob = new Blob([vtt], { type: "text/vtt" });
-      const url = URL.createObjectURL(blob);
-      blobRef.current = url;
-      setVttBlobUrl(url);
-    }).catch(() => {
-      showMessage({ type: "error", title: "视频文件已丢失", description: "原文件已被移动或删除，无法播放。" });
-    });
+        const vtt = itemsToVtt(entry.subtitles);
+        const blob = new Blob([vtt], { type: "text/vtt" });
+        const url = URL.createObjectURL(blob);
+        blobRef.current = url;
+        setVttBlobUrl(url);
+      })
+      .catch(() => {
+        showMessage({
+          type: "error",
+          title: "视频文件已丢失",
+          description: "原文件已被移动或删除，无法播放。",
+        });
+      });
   }, []);
 
   return (
@@ -57,7 +73,9 @@ export default function PlayerPage() {
               <div className="text-center p-6">
                 <Icon name="close" className="w-8 h-8 text-app-error mx-auto mb-3" />
                 <p className="text-app-error text-sm">{loadError}</p>
-                <p className="text-app-text-tertiary text-xs mt-2 truncate max-w-sm">{activeEntry.videoPath}</p>
+                <p className="text-app-text-tertiary text-xs mt-2 truncate max-w-sm">
+                  {activeEntry.videoPath}
+                </p>
               </div>
             </div>
           ) : (

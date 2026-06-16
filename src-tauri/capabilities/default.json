@@ -29,12 +29,6 @@
     {
       "identifier": "shell:allow-open",
       "allow": [
-        { "path": "$HOME/**" },
-        { "path": "$TEMP/**" },
-        { "path": "$DESKTOP/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
-        { "path": "$VIDEO/**" },
         { "path": "https://dashscope.aliyuncs.com/**" },
         { "path": "https://dashscope.aliyun.com/**" }
       ]
@@ -42,7 +36,8 @@
     {
       "identifier": "fs:default",
       "allow": [
-        { "path": "$HOME/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCACHE/**" },
         { "path": "$TEMP/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOWNLOAD/**" },
@@ -56,9 +51,7 @@
     "store:default",
     {
       "identifier": "http:default",
-      "allow": [
-        { "url": "https://dashscope.aliyuncs.com/**" }
-      ]
+      "allow": [{ "url": "https://dashscope.aliyuncs.com/**" }]
     }
   ]
 }

@@ -24,6 +24,7 @@ serde_json = "1"
 reqwest = { version = "0.12", features = ["stream", "rustls-tls", "multipart", "json"], default-features = false }
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["codec"] }
 
 [profile.release]
 strip = true

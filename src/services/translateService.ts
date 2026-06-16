@@ -1,88 +1,61 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, emit } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import type { SubtitleItem, Language, HistoryEntry } from "@/types";
 import { MAX_DIRECT_UPLOAD_BYTES, SUPPORTED_AUDIO_EXTS } from "@/config";
-import { parseModelOutput, itemsToSrt } from "@/utils/srtParser";
+import { parseModelOutputWithWarnings, itemsToSrt } from "@/utils/srtParser";
 import { showModal } from "@/components/Modal/create";
 import { showMessage } from "@/components/Toast/create";
-import { runFfmpeg, runExtractAudio, killFfmpeg } from "./ffmpegService";
+import { runFfmpeg, runExtractAudio } from "./ffmpegService";
 import { probe, formatDuration, picks, MAX_DURATION_SECONDS } from "./mediaService";
+import {
+  createTempPath,
+  isAlive,
+  killSession,
+  newSession,
+  requireSession,
+  safeSet,
+  trackTemp,
+  type PipelineSession,
+} from "./pipelineSession";
 import { useTranslationStore } from "@/stores/translationStore";
 import { useHistoryStore } from "@/stores/historyStore";
 import type { TranslationState, TranslationActions } from "@/stores/translationStore";
 
-// ── Pipeline session (one per run, atomically replaced on restart) ──
-
-type PipelineSession = {
-  id: number;
-  unlisten: (() => void) | null;
-  rawText: string;
-  tempFiles: string[];
-};
-
-let session: PipelineSession | null = null;
-let nextId = 1;
 let pendingCtx: PendingCtx | null = null;
-
-function newSession(): PipelineSession {
-  killSession();
-  const s: PipelineSession = { id: nextId++, unlisten: null, rawText: "", tempFiles: [] };
-  session = s;
-  return s;
-}
-
-function killSession() {
-  if (!session) return;
-  if (session.unlisten) { session.unlisten(); session.unlisten = null; }
-  killFfmpeg();
-  for (const p of session.tempFiles) {
-    invoke("delete_file", { path: p }).catch(() => {});
-  }
-  session = null;
-}
-
-function isAlive(s: PipelineSession): boolean {
-  return session !== null && session.id === s.id;
-}
-
-/** Wraps a store-level setState so it only fires if the given session is still alive */
-function safeSet(ss: PipelineSession, set: (s: Partial<TranslationState>) => void): (s: Partial<TranslationState>) => void {
-  return (s) => { if (isAlive(ss)) set(s); };
-}
 
 type PendingCtx = {
   sessionId: number;
-  filePath: string; fileName: string; apiKey: string;
-  sourceLang: Language; targetLang: Language;
+  filePath: string;
+  fileName: string;
+  apiKey: string;
+  sourceLang: Language;
+  targetLang: Language;
   resolution: { width: number; height: number; size: number };
 };
-
-// ── Helpers ──
-
-function trackTemp(ss: PipelineSession, path: string) { ss.tempFiles.push(path); }
-
-/** Look up or reject: returns the session if it's still alive */
-function requireSession(sid: number): PipelineSession | null {
-  if (session && session.id === sid) return session;
-  return null;
-}
 
 function makeEntry(
   videoFile: { name: string; path: string } | null,
   subtitleItems: SubtitleItem[],
-  sourceLang: Language, targetLang: Language,
-  mediaType: "audio" | "video", status: "completed" | "error", error?: string,
+  sourceLang: Language,
+  targetLang: Language,
+  mediaType: "audio" | "video",
+  status: "completed" | "error",
+  error?: string,
+  id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  subtitleFilePath?: string,
 ): HistoryEntry {
   return {
-    id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    id,
     createdAt: Date.now(),
     videoName: videoFile?.name || "",
     videoPath: videoFile?.path || "",
-    sourceLang, targetLang,
+    sourceLang,
+    targetLang,
     mode: mediaType,
     subtitles: status === "completed" ? subtitleItems : [],
     status,
     ...(error ? { error } : {}),
+    ...(subtitleFilePath ? { subtitleFilePath } : {}),
   };
 }
 
@@ -95,26 +68,34 @@ export function resetPipeline() {
 
 export function cancelPipeline() {
   killSession();
-  emit("translate-cancel").catch(() => {});
 }
 
 // ── Main pipeline entry ──
 
 export function startPipeline(
-  filePath: string, fileName: string, mode: "audio" | "video",
-  apiKey: string, sourceLang: Language, targetLang: Language,
+  filePath: string,
+  fileName: string,
+  mode: "audio" | "video",
+  apiKey: string,
+  sourceLang: Language,
+  targetLang: Language,
 ) {
   const store = useTranslationStore;
   const ss = newSession();
   const _set = (s: Partial<TranslationState>) => store.setState(s);
   const set = safeSet(ss, _set);
-  const get = (): TranslationState & TranslationActions => store.getState() as any;
+  const get = (): TranslationState & TranslationActions => store.getState();
   pendingCtx = null;
 
   set({
-    appStep: "processing", pipelinePhase: "extracting", videoFile: { name: fileName, path: filePath },
+    appStep: "processing",
+    pipelinePhase: "extracting",
+    videoFile: { name: fileName, path: filePath },
     progress: mode === "video" ? "检查文件..." : "分析文件中...",
-    error: null, subtitleCount: 0, rawPreviewText: "", subtitleItems: [],
+    error: null,
+    subtitleCount: 0,
+    rawPreviewText: "",
+    subtitleItems: [],
   });
 
   (async () => {
@@ -138,13 +119,29 @@ export function startPipeline(
 
       if (mode === "video") {
         if (meta.size > MAX_DIRECT_UPLOAD_BYTES) {
-          pendingCtx = { sessionId: ss.id, filePath, fileName, apiKey, sourceLang, targetLang, resolution: meta };
+          pendingCtx = {
+            sessionId: ss.id,
+            filePath,
+            fileName,
+            apiKey,
+            sourceLang,
+            targetLang,
+            resolution: meta,
+          };
           set({ progress: `${picks(meta.height).pass1Label} — 等待确认` });
           showModal("LargeVideo", {
             videoName: fileName,
             sizeMB,
-            onCompress: () => { const c = pendingCtx; pendingCtx = null; if (c) runCompress(c); },
-            onSwitchToAudio: () => { const c = pendingCtx; pendingCtx = null; if (c) runAudio(c); },
+            onCompress: () => {
+              const c = pendingCtx;
+              pendingCtx = null;
+              if (c) runCompress(c);
+            },
+            onSwitchToAudio: () => {
+              const c = pendingCtx;
+              pendingCtx = null;
+              if (c) runAudio(c);
+            },
           });
           return;
         }
@@ -157,9 +154,9 @@ export function startPipeline(
           mediaType = "audio";
         } else {
           set({ progress: "正在提取音频..." });
-          const ap = filePath.replace(/\.[^.]+$/, "") + `_audio_${Date.now()}.mp3`;
+          const ap = await createTempPath("mp3");
           trackTemp(ss, ap);
-          if (!await runExtractAudio(filePath, ap, set)) return;
+          if (!(await runExtractAudio(filePath, ap, set))) return;
           mediaFile = ap;
           mediaType = "audio";
           set({ progress: "音频提取完成" });
@@ -185,18 +182,56 @@ async function runCompress(ctx: PendingCtx) {
   const store = useTranslationStore;
   const _set = (s: Partial<TranslationState>) => store.setState(s);
   const set = safeSet(ss, _set);
-  const get = (): TranslationState & TranslationActions => store.getState() as any;
+  const get = (): TranslationState & TranslationActions => store.getState();
 
-  set({ appStep: "processing", pipelinePhase: "extracting", progress: "开始压缩...", error: null, subtitleCount: 0, rawPreviewText: "", subtitleItems: [] });
+  set({
+    appStep: "processing",
+    pipelinePhase: "extracting",
+    progress: "开始压缩...",
+    error: null,
+    subtitleCount: 0,
+    rawPreviewText: "",
+    subtitleItems: [],
+  });
 
   const { pass1Scale, pass1Label } = picks(resolution.height);
   set({ progress: pass1Label });
-  const vp1 = filePath.replace(/\.[^.]+$/, "") + `_comp_${Date.now()}.mp4`;
+  const vp1 = await createTempPath("mp4");
   trackTemp(ss, vp1);
 
-  if (!await runFfmpeg(["-i", filePath, "-vf", pass1Scale, "-r", "25", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", "-y", vp1], pass1Label, set)) return;
+  if (
+    !(await runFfmpeg(
+      [
+        "-i",
+        filePath,
+        "-vf",
+        pass1Scale,
+        "-r",
+        "25",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "28",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "64k",
+        "-movflags",
+        "+faststart",
+        "-y",
+        vp1,
+      ],
+      pass1Label,
+      set,
+    ))
+  )
+    return;
 
-  const s1 = (await invoke("get_file_info", { path: vp1 }).catch(() => ({ size: 0 })) as { size: number });
+  const s1 = (await invoke("get_file_info", { path: vp1 }).catch(() => ({ size: 0 }))) as {
+    size: number;
+  };
   if (s1.size <= MAX_DIRECT_UPLOAD_BYTES) {
     set({ progress: `压缩完成 (${(s1.size / 1048576).toFixed(1)} MB)` });
     if (!isAlive(ss)) return;
@@ -205,11 +240,43 @@ async function runCompress(ctx: PendingCtx) {
   }
 
   set({ progress: `压缩后仍过大 (${(s1.size / 1048576).toFixed(1)} MB)，极限压缩 240p...` });
-  const vp2 = filePath.replace(/\.[^.]+$/, "") + `_240p_${Date.now()}.mp4`;
+  const vp2 = await createTempPath("mp4");
   trackTemp(ss, vp2);
-  if (!await runFfmpeg(["-i", filePath, "-vf", "scale=-2:240", "-r", "15", "-c:v", "libx264", "-preset", "veryfast", "-crf", "35", "-c:a", "aac", "-b:a", "48k", "-ac", "1", "-movflags", "+faststart", "-y", vp2], "极限压缩 240p 中...", set)) return;
+  if (
+    !(await runFfmpeg(
+      [
+        "-i",
+        filePath,
+        "-vf",
+        "scale=-2:240",
+        "-r",
+        "15",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "35",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "48k",
+        "-ac",
+        "1",
+        "-movflags",
+        "+faststart",
+        "-y",
+        vp2,
+      ],
+      "极限压缩 240p 中...",
+      set,
+    ))
+  )
+    return;
 
-  const s2 = (await invoke("get_file_info", { path: vp2 }).catch(() => ({ size: 0 })) as { size: number });
+  const s2 = (await invoke("get_file_info", { path: vp2 }).catch(() => ({ size: 0 }))) as {
+    size: number;
+  };
   if (s2.size <= MAX_DIRECT_UPLOAD_BYTES) {
     set({ progress: `240p 压缩完成 (${(s2.size / 1048576).toFixed(1)} MB)` });
     if (!isAlive(ss)) return;
@@ -219,8 +286,9 @@ async function runCompress(ctx: PendingCtx) {
 
   set({ progress: `压缩后仍过大 (${(s2.size / 1048576).toFixed(1)} MB)，转为音频提取...` });
   if (!isAlive(ss)) return;
-  const ap = filePath.replace(/\.[^.]+$/, "") + `_audio_${Date.now()}.mp3`;
-  if (!await runExtractAudio(filePath, ap, set)) return;
+  const ap = await createTempPath("mp3");
+  trackTemp(ss, ap);
+  if (!(await runExtractAudio(filePath, ap, set))) return;
   if (!isAlive(ss)) return;
   await uploadAndTranslate(ss, ap, "audio", apiKey, sourceLang, targetLang, set, get);
 }
@@ -233,13 +301,21 @@ async function runAudio(ctx: PendingCtx) {
   const store = useTranslationStore;
   const _set = (s: Partial<TranslationState>) => store.setState(s);
   const set = safeSet(ss, _set);
-  const get = (): TranslationState & TranslationActions => store.getState() as any;
+  const get = (): TranslationState & TranslationActions => store.getState();
 
-  set({ appStep: "processing", pipelinePhase: "extracting", progress: "正在提取音频...", error: null, subtitleCount: 0, rawPreviewText: "", subtitleItems: [] });
+  set({
+    appStep: "processing",
+    pipelinePhase: "extracting",
+    progress: "正在提取音频...",
+    error: null,
+    subtitleCount: 0,
+    rawPreviewText: "",
+    subtitleItems: [],
+  });
 
-  const ap = filePath.replace(/\.[^.]+$/, "") + `_audio_${Date.now()}.mp3`;
+  const ap = await createTempPath("mp3");
   trackTemp(ss, ap);
-  if (!await runExtractAudio(filePath, ap, set)) return;
+  if (!(await runExtractAudio(filePath, ap, set))) return;
   if (!isAlive(ss)) return;
   set({ progress: "音频提取完成" });
   await uploadAndTranslate(ss, ap, "audio", apiKey, sourceLang, targetLang, set, get);
@@ -249,19 +325,123 @@ async function runAudio(ctx: PendingCtx) {
 
 async function uploadAndTranslate(
   ss: PipelineSession,
-  mediaFile: string, mediaType: "audio" | "video",
-  apiKey: string, sourceLang: Language, targetLang: Language,
+  mediaFile: string,
+  mediaType: "audio" | "video",
+  apiKey: string,
+  sourceLang: Language,
+  targetLang: Language,
   set: (p: Partial<TranslationState>) => void,
   get: () => TranslationState & TranslationActions,
 ) {
-  const uploadSize = (await invoke("get_file_info", { path: mediaFile }).catch(() => ({ size: 0 })) as { size: number });
+  const uploadSize = (await invoke("get_file_info", { path: mediaFile }).catch(() => ({
+    size: 0,
+  }))) as { size: number };
   const uploadMB = (uploadSize.size / 1024 / 1024).toFixed(1);
   set({ pipelinePhase: "uploading", progress: `准备上传 (${uploadMB} MB)...` });
 
+  if (ss.unlisten) {
+    ss.unlisten();
+    ss.unlisten = null;
+  }
+  type TaskEvent<T> = { taskId: string; payload: T };
+  const isCurrentEvent = (payload: TaskEvent<unknown>) => payload?.taskId === ss.taskId;
+
+  const up = await listen<TaskEvent<string>>("translate-progress", (e) => {
+    if (!isCurrentEvent(e.payload)) return;
+    set({ progress: String(e.payload.payload) });
+  });
+  const uc = await listen<TaskEvent<string>>("translate-chunk", (e) => {
+    if (!isCurrentEvent(e.payload)) return;
+    ss.rawText += String(e.payload.payload);
+    set({
+      rawPreviewText: ss.rawText.length > 2000 ? "..." + ss.rawText.slice(-2000) : ss.rawText,
+    });
+  });
+  const ue = await listen<TaskEvent<string>>("translate-error", (e) => {
+    if (!isCurrentEvent(e.payload)) return;
+    up();
+    uc();
+    ue();
+    ud();
+    ss.unlisten = null;
+    set({ error: String(e.payload.payload), pipelinePhase: null });
+  });
+  const ud = await listen<TaskEvent<null>>("translate-done", async (e) => {
+    if (!isCurrentEvent(e.payload)) return;
+    up();
+    uc();
+    ue();
+    ud();
+    ss.unlisten = null;
+    if (!isAlive(ss)) return;
+    const parsed = parseModelOutputWithWarnings(ss.rawText);
+    const resolved = parsed.items;
+    if (resolved.length === 0) {
+      set({
+        error: ss.rawText.trim()
+          ? "模型返回内容无法解析为 SRT，请重试或复制实时流内容手动处理。"
+          : "模型未返回可用字幕内容。",
+        rawPreviewText: ss.rawText,
+        pipelinePhase: null,
+      });
+      return;
+    }
+
+    // Atomic: push to history using a function updater, save atomically
+    useTranslationStore.setState(() => ({
+      subtitleItems: resolved,
+      subtitleCount: resolved.length,
+      rawPreviewText: "",
+      pipelinePhase: null,
+      appStep: "preview",
+    }));
+
+    const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    let subtitleFilePath: string | undefined;
+    try {
+      subtitleFilePath = (await invoke("write_subtitle_file", {
+        id,
+        content: itemsToSrt(resolved),
+      })) as string;
+    } catch (err) {
+      showMessage({
+        type: "warning",
+        title: "字幕缓存保存失败",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const entry = makeEntry(
+      get().videoFile,
+      resolved,
+      sourceLang,
+      targetLang,
+      mediaType,
+      "completed",
+      undefined,
+      id,
+      subtitleFilePath,
+    );
+    await useHistoryStore.getState().prepend(entry);
+  });
+  ss.unlisten = () => {
+    up();
+    uc();
+    ue();
+    ud();
+  };
+
   let ossUrl: string;
   try {
-    ossUrl = await invoke("upload_to_dashscope_oss", { filePath: mediaFile, apiKey }) as string;
+    ossUrl = (await invoke("upload_to_dashscope_oss", {
+      taskId: ss.taskId,
+      filePath: mediaFile,
+      apiKey,
+    })) as string;
   } catch (err) {
+    if (ss.unlisten) {
+      ss.unlisten();
+      ss.unlisten = null;
+    }
     set({ error: err instanceof Error ? err.message : String(err), pipelinePhase: null });
     return;
   }
@@ -273,45 +453,19 @@ async function uploadAndTranslate(
   ss.tempFiles.length = 0;
 
   set({ pipelinePhase: "translating", progress: "AI 正在识别并翻译..." });
-  if (ss.unlisten) { ss.unlisten(); ss.unlisten = null; }
-
-  const up = await listen("translate-progress", (e: any) => set({ progress: String(e.payload) }));
-  const uc = await listen("translate-chunk", (e: any) => {
-    ss.rawText += String(e.payload);
-    set({ rawPreviewText: ss.rawText.length > 2000 ? "..." + ss.rawText.slice(-2000) : ss.rawText });
-  });
-  const ue = await listen("translate-error", (e: any) => {
-    up(); uc(); ue(); ss.unlisten = null;
-    set({ error: String(e.payload), pipelinePhase: null });
-  });
-  const ud = await listen("translate-done", async () => {
-    up(); uc(); ue(); ud(); ss.unlisten = null;
-    if (!isAlive(ss)) return;
-    const items = parseModelOutput(ss.rawText);
-    const resolved = items.length === 0 && ss.rawText.trim()
-      ? [{ index: 1, start: "00:00:00,000", end: "00:00:00,000", text: ss.rawText.trim() }]
-      : items;
-    const entry = makeEntry(get().videoFile, resolved, sourceLang, targetLang, mediaType, "completed");
-
-    // Atomic: push to history using a function updater, save atomically
-    useTranslationStore.setState(() => ({
-      subtitleItems: resolved,
-      subtitleCount: resolved.length,
-      rawPreviewText: "",
-      pipelinePhase: null,
-      appStep: "preview",
-    }));
-
-    useHistoryStore.getState().prepend(entry);
-
-    invoke("write_subtitle_file", { id: entry.id, content: itemsToSrt(resolved) }).catch(() => {});
-  });
-  ss.unlisten = () => { up(); uc(); ue(); ud(); };
 
   try {
-    await invoke("stream_translate", { req: { ossUrl, apiKey, mediaType, sourceLang, targetLang } });
+    await invoke("stream_translate", {
+      req: { taskId: ss.taskId, ossUrl, apiKey, mediaType, sourceLang, targetLang },
+    });
   } catch (err) {
-    if (ss.unlisten) { up(); uc(); ue(); ud(); ss.unlisten = null; }
+    if (ss.unlisten) {
+      up();
+      uc();
+      ue();
+      ud();
+      ss.unlisten = null;
+    }
     if (!isAlive(ss)) return;
     set({ error: err instanceof Error ? err.message : String(err), pipelinePhase: null });
   }

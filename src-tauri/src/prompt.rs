@@ -2,10 +2,13 @@ pub fn build_prompt(source_lang: &str, target_lang: &str, is_video: bool) -> Str
     let media_type = if is_video { "视频" } else { "音频" };
     let extra = if is_video {
         "2. 请同时利用视频画面中的文字和语音信息，以获得更准确的字幕。"
-    } else { "" };
+    } else {
+        ""
+    };
 
     if source_lang == target_lang {
-        format!(r#"# Role
+        format!(
+            r#"# Role
 你是一个极其严谨的音视频转录专家，专门负责将{source_lang}{media_type}转录并制作成{target_lang} SRT字幕。
 
 # Task Instructions
@@ -29,9 +32,11 @@ pub fn build_prompt(source_lang: &str, target_lang: &str, is_video: bool) -> Str
 
 2
 00:00:03,500 --> 00:00:07,200
-[这里是后续有人说话时的转录文本]"#)
+[这里是后续有人说话时的转录文本]"#
+        )
     } else {
-        format!(r#"# Role
+        format!(
+            r#"# Role
 你是一个极其严谨的音视频同声传译专家，专门负责将{source_lang}{media_type}【直接翻译】并制作成{target_lang} SRT字幕。
 
 # Task Instructions
@@ -57,6 +62,31 @@ pub fn build_prompt(source_lang: &str, target_lang: &str, is_video: bool) -> Str
 
 2
 00:00:03,500 --> 00:00:07,200
-[这里是后续有人说话翻译后的{target_lang}内容]"#)
+[这里是后续有人说话翻译后的{target_lang}内容]"#
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_prompt;
+
+    #[test]
+    fn builds_transcription_prompt_when_languages_match() {
+        let prompt = build_prompt("中文", "中文", false);
+
+        assert!(prompt.contains("转录"));
+        assert!(prompt.contains("严禁输出任何 Markdown"));
+        assert!(!prompt.contains("直接翻译"));
+    }
+
+    #[test]
+    fn builds_translation_prompt_for_different_languages() {
+        let prompt = build_prompt("日语", "中文", true);
+
+        assert!(prompt.contains("直接翻译"));
+        assert!(prompt.contains("视频画面"));
+        assert!(prompt.contains("日语"));
+        assert!(prompt.contains("中文"));
     }
 }

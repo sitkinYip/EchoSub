@@ -5,6 +5,7 @@ const STORE_VERSION = 1;
 
 let saving = false;
 let pendingEntries: HistoryEntry[] | null = null;
+let savePromise: Promise<void> | null = null;
 
 export async function loadHistory(): Promise<HistoryEntry[]> {
   try {
@@ -23,17 +24,29 @@ export async function loadHistory(): Promise<HistoryEntry[]> {
 
 export async function saveHistory(entries: HistoryEntry[]): Promise<void> {
   pendingEntries = entries;
-  if (saving) return;
+  if (saving) return savePromise || Promise.resolve();
   saving = true;
-  while (pendingEntries) {
-    const batch = pendingEntries;
-    pendingEntries = null;
-    try {
-      const store = await Store.load("history.json");
-      await store.set("_version", STORE_VERSION);
-      await store.set("entries", batch);
-      await store.save();
-    } catch (err) { console.error("保存历史记录失败:", err); }
+  savePromise = (async () => {
+    while (pendingEntries) {
+      const batch = pendingEntries;
+      pendingEntries = null;
+      try {
+        const store = await Store.load("history.json");
+        await store.set("_version", STORE_VERSION);
+        await store.set("entries", batch);
+        await store.save();
+      } catch (err) {
+        pendingEntries = null;
+        console.error("保存历史记录失败:", err);
+        throw err;
+      }
+    }
+  })();
+
+  try {
+    await savePromise;
+  } finally {
+    saving = false;
+    savePromise = null;
   }
-  saving = false;
 }

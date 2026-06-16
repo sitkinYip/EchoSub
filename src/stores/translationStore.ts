@@ -14,14 +14,23 @@ export interface TranslationState {
   rawPreviewText: string;
   subtitleItems: SubtitleItem[];
   regenerate: {
-    videoPath: string; videoName: string;
-    sourceLang: Language; targetLang: Language;
+    videoPath: string;
+    videoName: string;
+    sourceLang: Language;
+    targetLang: Language;
     uploadVideo: boolean;
   } | null;
 }
 
 export interface TranslationActions {
-  startPipeline: (filePath: string, fileName: string, mode: "audio" | "video", apiKey: string, sourceLang: Language, targetLang: Language) => void;
+  startPipeline: (
+    filePath: string,
+    fileName: string,
+    mode: "audio" | "video",
+    apiKey: string,
+    sourceLang: Language,
+    targetLang: Language,
+  ) => void;
   cancel: () => void;
   reset: () => void;
   updateSubtitleText: (index: number, text: string) => void;
@@ -30,24 +39,44 @@ export interface TranslationActions {
 }
 
 export const useTranslationStore = create<TranslationState & TranslationActions>((set) => ({
-  appStep: "idle", pipelinePhase: null, videoFile: null,
-  progress: "", error: null, subtitleCount: 0,
-  rawPreviewText: "", subtitleItems: [],
+  appStep: "idle",
+  pipelinePhase: null,
+  videoFile: null,
+  progress: "",
+  error: null,
+  subtitleCount: 0,
+  rawPreviewText: "",
+  subtitleItems: [],
   regenerate: null,
 
   startPipeline: (filePath, fileName, mode, apiKey, sourceLang, targetLang) => {
     startPipeline(filePath, fileName, mode, apiKey, sourceLang, targetLang);
   },
 
-  cancel: () => { cancelPipeline(); set({ pipelinePhase: null, appStep: "idle" }); },
+  cancel: () => {
+    cancelPipeline();
+    set({ pipelinePhase: null, appStep: "idle" });
+  },
   reset: () => {
     resetPipeline();
-    set({ appStep: "idle", pipelinePhase: null, videoFile: null, progress: "", error: null, subtitleCount: 0, rawPreviewText: "", subtitleItems: [] });
+    set({
+      appStep: "idle",
+      pipelinePhase: null,
+      videoFile: null,
+      progress: "",
+      error: null,
+      subtitleCount: 0,
+      rawPreviewText: "",
+      subtitleItems: [],
+    });
   },
 
-  updateSubtitleText: (index, text) => set((s) => ({
-    subtitleItems: s.subtitleItems.map((item) => item.index === index ? { ...item, text } : item),
-  })),
+  updateSubtitleText: (index, text) =>
+    set((s) => ({
+      subtitleItems: s.subtitleItems.map((item) =>
+        item.index === index ? { ...item, text } : item,
+      ),
+    })),
 
   setRegenerate: (r) => set({ regenerate: r }),
   clearRegenerate: () => set({ regenerate: null }),

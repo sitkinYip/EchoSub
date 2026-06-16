@@ -1,6 +1,12 @@
 import Icon from "@/components/Icon";
 
-interface Props { name: string; sourceLang: string; targetLang: string; mode: string; onReset: () => void; }
+interface Props {
+  name: string;
+  sourceLang: string;
+  targetLang: string;
+  mode: string;
+  onReset: () => void;
+}
 
 export default function FilePill({ name, sourceLang, targetLang, mode, onReset }: Props) {
   return (
@@ -9,8 +15,15 @@ export default function FilePill({ name, sourceLang, targetLang, mode, onReset }
         <Icon name="video" className="w-4 h-4 text-app-accent" />
       </div>
       <span className="text-sm text-app-text flex-1 truncate">{name}</span>
-      <span className="text-xs text-app-text-tertiary">{sourceLang} → {targetLang} · {mode}</span>
-      <button onClick={onReset} className="text-xs text-app-text-tertiary hover:text-app-text-secondary transition-colors">重新选择</button>
+      <span className="text-xs text-app-text-tertiary">
+        {sourceLang} → {targetLang} · {mode}
+      </span>
+      <button
+        onClick={onReset}
+        className="text-xs text-app-text-tertiary hover:text-app-text-secondary transition-colors"
+      >
+        重新选择
+      </button>
     </div>
   );
 }

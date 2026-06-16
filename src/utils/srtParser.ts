@@ -23,22 +23,24 @@ export function parseModelOutput(rawText: string, _collectWarnings?: boolean): S
   return result.items;
 }
 
+export function parseModelOutputWithWarnings(rawText: string): ParseResult {
+  return tryParse(rawText);
+}
+
 /** Internal: try multiple parsing strategies and collect warnings */
 function tryParse(rawText: string): ParseResult {
   const warnings: string[] = [];
 
   // Step 0: aggressive normalization
   let text = rawText
-    .replace(/^﻿/, "")          // BOM
-    .replace(/\r\n/g, "\n")          // CRLF → LF
-    .replace(/\r/g, "\n")            // CR → LF
-    .replace(/\n{3,}/g, "\n\n")     // Collapse 3+ blank lines → 2
+    .replace(/^\uFEFF/, "") // BOM
+    .replace(/\r\n/g, "\n") // CRLF → LF
+    .replace(/\r/g, "\n") // CR → LF
+    .replace(/\n{3,}/g, "\n\n") // Collapse 3+ blank lines → 2
     .trim();
 
   // Strip markdown code fences that AI sometimes wraps output in
-  text = text
-    .replace(/^```(?:srt|SRT)?\s*\n?/i, "")
-    .replace(/\n?```\s*$/i, "");
+  text = text.replace(/^```(?:srt|SRT)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
 
   // Step 1: standard SRT block parser (most reliable)
   const srtItems = trySrtBlocks(text);
@@ -67,7 +69,8 @@ function tryParse(rawText: string): ParseResult {
 function trySrtBlocks(text: string): SubtitleItem[] {
   const items: SubtitleItem[] = [];
   // More lenient: allow optional index, flexible spacing
-  const re = /(?:^\d+\s*\n)?(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*\n([\s\S]*?)(?=\n\s*(?:\d+\s*\n)?\d{1,2}:\d{2}:\d{2}|\n*$)/gm;
+  const re =
+    /(?:^\d+\s*\n)?(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*\n([\s\S]*?)(?=\n\s*(?:\d+\s*\n)?\d{1,2}:\d{2}:\d{2}|\n*$)/gm;
   let m: RegExpExecArray | null;
   let index = 1;
 
@@ -89,7 +92,8 @@ function trySrtBlocks(text: string): SubtitleItem[] {
 
 function tryBracketLines(text: string): SubtitleItem[] {
   const items: SubtitleItem[] = [];
-  const re = /\[(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\]\s*(.+)/g;
+  const re =
+    /\[(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\]\s*(.+)/g;
   let m: RegExpExecArray | null;
   let index = 1;
 
@@ -113,7 +117,9 @@ function tryLooseTimestamps(text: string): SubtitleItem[] {
   let index = 1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    const tsMatch = line.match(/(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/);
+    const tsMatch = line.match(
+      /(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/,
+    );
     if (!tsMatch) continue;
 
     // The text is either the next non-empty line, or the rest of this line after the timestamp
@@ -131,7 +137,12 @@ function tryLooseTimestamps(text: string): SubtitleItem[] {
     }
 
     if (body) {
-      items.push({ index: index++, start: normTime(tsMatch[1]), end: normTime(tsMatch[2]), text: body });
+      items.push({
+        index: index++,
+        start: normTime(tsMatch[1]),
+        end: normTime(tsMatch[2]),
+        text: body,
+      });
     }
   }
 
@@ -141,7 +152,9 @@ function tryLooseTimestamps(text: string): SubtitleItem[] {
 // ── Export utilities ──
 
 export function itemsToSrt(items: SubtitleItem[]): string {
-  return items.map((item, i) => `${i + 1}\n${item.start} --> ${item.end}\n${item.text}\n`).join("\n");
+  return items
+    .map((item, i) => `${i + 1}\n${item.start} --> ${item.end}\n${item.text}\n`)
+    .join("\n");
 }
 
 export function parseToSrt(rawText: string): string {
