@@ -36,6 +36,7 @@ EchoSub 是一个基于 Tauri v2 的桌面端 AI 字幕工具。它在本地用 
 - Rust stable
 - DashScope API Key
 - FFmpeg sidecar binary
+- llama.cpp `llama-server` sidecar binary（仅本地字幕翻译 / fallback 需要）
 
 ### 安装依赖
 
@@ -58,6 +59,51 @@ chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
 ```json
 "externalBin": ["binaries/ffmpeg"]
 ```
+
+### 安装 llama-server sidecar（可选）
+
+只有使用本地字幕翻译或云端失败后本地 fallback 时才需要。
+
+Tauri 配置里写的是不带平台后缀的名称：
+
+```json
+"externalBin": ["binaries/ffmpeg", "binaries/llama-server"]
+```
+
+但实际文件必须按当前平台放到 `src-tauri/binaries/`：
+
+- macOS Apple Silicon：`llama-server-aarch64-apple-darwin`
+- Windows x64：`llama-server-x86_64-pc-windows-msvc.exe`
+
+Windows x64 示例：
+
+```powershell
+# 下载 https://github.com/ggml-org/llama.cpp/releases 中的 Windows 包
+# CPU 通用包：llama-*-bin-win-cpu-x64.zip
+# Vulkan/CUDA 包只在确认本机驱动和运行库匹配时使用
+
+Expand-Archive .\llama-*-bin-win-cpu-x64.zip -DestinationPath .\llama
+Copy-Item .\llama\llama-*\llama-server.exe .\src-tauri\binaries\llama-server-x86_64-pc-windows-msvc.exe
+Copy-Item .\llama\llama-*\*.dll .\src-tauri\binaries\
+.\src-tauri\binaries\llama-server-x86_64-pc-windows-msvc.exe --version
+```
+
+macOS Apple Silicon 示例：
+
+```bash
+# 方式一：先验证本机可运行
+brew install llama.cpp
+llama-server --version
+
+# 方式二：使用官方 release 包
+# 下载 https://github.com/ggml-org/llama.cpp/releases 中的 llama-*-bin-macos-arm64.tar.gz
+# 解压后复制 llama-server 和同包 lib*.dylib 到 src-tauri/binaries/
+cp llama-server src-tauri/binaries/llama-server-aarch64-apple-darwin
+cp lib*.dylib src-tauri/binaries/
+chmod +x src-tauri/binaries/llama-server-aarch64-apple-darwin
+```
+
+如果启动时报 `No such file or directory (os error 2)`，通常是 `llama-server-{target-triple}` 没放到 `src-tauri/binaries/`。如果进程被 Windows Defender、企业安全软件、macOS Gatekeeper/XProtect 等策略拦截，需要按本机策略放行或改用本机编译/Homebrew/包管理器版本。
 
 ### 开发启动
 

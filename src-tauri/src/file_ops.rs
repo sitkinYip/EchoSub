@@ -1,9 +1,10 @@
 use crate::state::AppState;
 use crate::types::FileInfo;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
+use sha2::{Digest, Sha256};
 
 fn sanitize_id(id: &str) -> Result<(), String> {
     if id.is_empty()
@@ -93,6 +94,26 @@ pub fn get_file_info(path: String) -> Result<FileInfo, String> {
     Ok(FileInfo {
         size: metadata.len(),
     })
+}
+
+#[tauri::command]
+pub fn calculate_file_hash(path: String) -> Result<String, String> {
+    let normalized = normalize_path(&path)?;
+    let mut file = fs::File::open(&normalized).map_err(|e| format!("无法打开文件计算哈希: {e}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("读取文件计算哈希失败: {e}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(hex::encode(hasher.finalize()))
 }
 
 #[tauri::command]

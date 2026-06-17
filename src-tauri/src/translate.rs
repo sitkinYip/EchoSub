@@ -1,9 +1,13 @@
 use tauri::{AppHandle, Emitter, State};
 
+use crate::local_llm::{self, LocalLlmState};
 use crate::prompt::build_prompt;
-use crate::providers::dashscope;
+use crate::providers::{
+    dashscope,
+    text_translate::{self, TextTranslateError},
+};
 use crate::state::AppState;
-use crate::types::{TaskEvent, TranslateRequest};
+use crate::types::{LocalPipelineRequest, TaskEvent, TranslateRequest};
 
 fn emit_task<T>(app: &AppHandle, event: &str, task_id: &str, payload: T)
 where
@@ -29,8 +33,13 @@ pub async fn stream_translate(
     let is_video = req.media_type == "video";
     let prompt = build_prompt(&req.source_lang, &req.target_lang, is_video);
 
-    let request_body =
-        dashscope::build_chat_request_body(&req.oss_url, &req.media_type, &req.source_lang, &req.target_lang, &prompt);
+    let request_body = dashscope::build_chat_request_body(
+        &req.oss_url,
+        &req.media_type,
+        &req.source_lang,
+        &req.target_lang,
+        &prompt,
+    );
 
     let body = request_body.to_string();
     crate::debug!("===== [Rust stream] REQUEST =====");
@@ -165,4 +174,154 @@ pub async fn stream_translate(
     }
     emit_task(&app, "translate-done", &task_id, ());
     Ok(())
+}
+
+#[tauri::command]
+pub async fn local_pipeline_translate(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    llm_state: State<'_, LocalLlmState>,
+    req: LocalPipelineRequest,
+) -> Result<(), String> {
+    let task_id = req.task_id.clone();
+    let same_language = req.source_lang == req.target_lang;
+    let app_for_whisper = app.clone();
+    let state_for_whisper = std::sync::Arc::new(state.inner().clone());
+    let wav_path = std::path::PathBuf::from(req.wav_path);
+    let model_path = std::path::PathBuf::from(req.model_path);
+    let source_lang = req.source_lang.clone();
+
+    let srt = tokio::task::spawn_blocking(move || {
+        crate::whisper::run_whisper_blocking_with_events(
+            app_for_whisper,
+            state_for_whisper,
+            task_id,
+            wav_path,
+            model_path,
+            source_lang,
+            crate::whisper::WhisperEventOptions {
+                emit_chunk: same_language,
+                emit_done: same_language,
+            },
+        )
+    })
+    .await
+    .map_err(|e| format!("Whisper 任务异常: {e}"))??;
+
+    if same_language {
+        return Ok(());
+    }
+
+    if state.is_cancelled(&req.task_id) {
+        emit_task(
+            &app,
+            "translate-error",
+            &req.task_id,
+            "任务已取消".to_string(),
+        );
+        return Err("任务已取消".to_string());
+    }
+
+    let fallback = req
+        .translation_fallback
+        .as_deref()
+        .unwrap_or("cloud-then-local");
+
+    if fallback == "local-only" {
+        return run_local_llm_translate(
+            app,
+            llm_state.inner(),
+            req.task_id,
+            srt,
+            req.source_lang,
+            req.target_lang,
+            req.translate_model_path,
+        )
+        .await;
+    }
+
+    let api_key = req
+        .api_key
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| "本地跨语言翻译需要 DashScope API Key".to_string())?;
+    let task_id_for_translate = req.task_id.clone();
+    match text_translate::stream_text_translate(
+        app.clone(),
+        state.inner().clone(),
+        task_id_for_translate,
+        srt.clone(),
+        req.source_lang.clone(),
+        req.target_lang.clone(),
+        api_key,
+    )
+    .await
+    {
+        Ok(()) => Ok(()),
+        Err(TextTranslateError::DataInspectionFailed(msg)) => {
+            if fallback == "cloud-then-local" {
+                crate::debug!(
+                    "[local pipeline] cloud text translate data inspection failed, falling back to local LLM: {msg}"
+                );
+                emit_task(
+                    &app,
+                    "translate-progress",
+                    &req.task_id,
+                    "云端文本翻译触发内容审核，切换本地字幕翻译...".to_string(),
+                );
+                run_local_llm_translate(
+                    app,
+                    llm_state.inner(),
+                    req.task_id,
+                    srt,
+                    req.source_lang,
+                    req.target_lang,
+                    req.translate_model_path,
+                )
+                .await
+            } else {
+                emit_task(&app, "translate-error", &req.task_id, msg.clone());
+                Err(msg)
+            }
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            emit_task(&app, "translate-error", &req.task_id, msg.clone());
+            Err(msg)
+        }
+    }
+}
+
+async fn run_local_llm_translate(
+    app: AppHandle,
+    llm_state: &LocalLlmState,
+    task_id: String,
+    srt: String,
+    source_lang: String,
+    target_lang: String,
+    translate_model_path: Option<String>,
+) -> Result<(), String> {
+    let model_path = translate_model_path
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| "请先下载并选择本地字幕翻译模型。".to_string())?;
+    match local_llm::translate_srt_with_local_llm(
+        app.clone(),
+        llm_state,
+        task_id.clone(),
+        srt,
+        source_lang,
+        target_lang,
+        model_path,
+    )
+    .await
+    {
+        Ok(translated_srt) => {
+            emit_task(&app, "translate-chunk", &task_id, translated_srt);
+            emit_task(&app, "translate-done", &task_id, ());
+            Ok(())
+        }
+        Err(err) => {
+            emit_task(&app, "translate-error", &task_id, err.clone());
+            Err(err)
+        }
+    }
 }

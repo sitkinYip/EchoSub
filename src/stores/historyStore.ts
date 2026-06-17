@@ -14,6 +14,7 @@ interface HistoryState {
   clear: () => Promise<void>;
   updateSubtitles: (historyId: string, subtitles: HistoryEntry["subtitles"]) => Promise<void>;
   prepend: (entry: HistoryEntry) => Promise<void>;
+  replaceEntry: (historyId: string, entry: HistoryEntry) => Promise<void>;
 }
 
 export const useHistoryStore = create<HistoryState>((set, get) => ({
@@ -105,6 +106,29 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     });
     try {
       await saveHistory(nextHistory);
+    } catch (err) {
+      showMessage({
+        type: "error",
+        title: "历史记录保存失败",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  replaceEntry: async (historyId, entry) => {
+    let oldEntry: HistoryEntry | undefined;
+    let nextHistory: HistoryEntry[] = [];
+    set((s) => {
+      oldEntry = s.history.find((item) => item.id === historyId);
+      const filtered = s.history.filter((item) => item.id !== historyId);
+      nextHistory = [entry, ...filtered];
+      return { history: nextHistory };
+    });
+    try {
+      await saveHistory(nextHistory);
+      if (oldEntry?.subtitleFilePath && oldEntry.subtitleFilePath !== entry.subtitleFilePath) {
+        await invoke("delete_subtitle_file", { path: oldEntry.subtitleFilePath }).catch(() => {});
+      }
     } catch (err) {
       showMessage({
         type: "error",

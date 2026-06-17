@@ -74,7 +74,15 @@ export default function HistoryCard({ entry, onDelete }: Props) {
       targetLang,
       uploadVideo: mode === "video",
       onConfirm: (src: Language, tgt: Language, uv: boolean) => {
-        setRegenerate({ videoPath, videoName, sourceLang: src, targetLang: tgt, uploadVideo: uv });
+        setRegenerate({
+          videoPath,
+          videoName,
+          fileHash: entry.fileHash,
+          replaceHistoryId: id,
+          sourceLang: src,
+          targetLang: tgt,
+          uploadVideo: uv,
+        });
         navigate("/");
       },
     });

@@ -38,7 +38,9 @@ export enum ModalName {
   ApiKey = "ApiKey",
   HistoryEdit = "HistoryEdit",
   RegenerateConfirm = "RegenerateConfirm",
+  DuplicateTranslation = "DuplicateTranslation",
   LargeVideo = "LargeVideo",
+  ModelManager = "ModelManager",
 }
 
 /**
@@ -72,10 +74,24 @@ export const MODAL_REGISTRY: Record<
         default: ErasedModalComponent;
       }>,
   },
+  [ModalName.DuplicateTranslation]: {
+    defaults: { maskClosable: true, showClose: true, width: "sm" },
+    loader: () =>
+      import("../pages/TranslatePage/DuplicateTranslationModal.tsx") as Promise<{
+        default: ErasedModalComponent;
+      }>,
+  },
   [ModalName.LargeVideo]: {
     defaults: { maskClosable: false, showClose: false, width: "sm" },
     loader: () =>
       import("../pages/TranslatePage/LargeVideoModal.tsx") as Promise<{
+        default: ErasedModalComponent;
+      }>,
+  },
+  [ModalName.ModelManager]: {
+    defaults: { maskClosable: true, showClose: true, width: "lg" },
+    loader: () =>
+      import("../components/ModelManagerModal/index.tsx") as Promise<{
         default: ErasedModalComponent;
       }>,
   },

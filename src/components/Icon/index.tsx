@@ -54,6 +54,24 @@ const PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   download: <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />,
+  "download-cloud": (
+    <path d="M8 17a5 5 0 01-.9-9.92A6 6 0 0118 9a4 4 0 011 7.87M12 12v8m0 0l-3-3m3 3l3-3" />
+  ),
+  trash: (
+    <>
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </>
+  ),
+  cpu: (
+    <>
+      <rect x="7" y="7" width="10" height="10" rx="2" />
+      <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3" />
+      <rect x="10" y="10" width="4" height="4" rx="1" />
+    </>
+  ),
   "arrow-right": <path d="M5 12h14M12 5l7 7-7 7" />,
   check: <path d="M20 6L9 17l-5-5" />,
   close: <path d="M6 18L18 6M6 6l12 12" />,

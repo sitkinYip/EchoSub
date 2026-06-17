@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AppState {
     cancelled_tasks: Arc<Mutex<HashSet<String>>>,
     temp_files: Arc<Mutex<HashSet<PathBuf>>>,

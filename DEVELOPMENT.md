@@ -160,6 +160,20 @@ Rust 规则：
 - `cancel_task`
 - `upload_to_dashscope_oss`
 - `stream_translate`
+- `local_pipeline_translate`
+- `list_whisper_models`
+- `get_local_whisper_models`
+- `download_whisper_model`
+- `delete_whisper_model`
+- `check_whisper_model_exists`
+- `list_translate_models`
+- `get_local_translate_models`
+- `download_translate_model`
+- `delete_translate_model`
+- `check_translate_model_exists`
+- `start_local_llm_server`
+- `stop_local_llm_server`
+- `get_local_llm_server_status`
 
 新增 command 时必须说明：
 
@@ -168,6 +182,99 @@ Rust 规则：
 - 是否允许任意路径。
 - 是否受 `taskId` 控制。
 - 错误如何给前端展示。
+
+### 6.1 本地 Whisper 开发注意
+
+本地 Whisper 使用 `whisper-rs`，会编译 whisper.cpp 相关 C/C++ 代码。开发机需要可用的 C/C++ 编译链和 CMake：
+
+- macOS：安装 Xcode Command Line Tools；Metal feature 默认启用。
+- Windows/Linux：先保证 CMake、clang/gcc 可用；当前默认 CPU 构建。
+
+音频输入必须由 FFmpeg 统一转为 16kHz、单声道、32-bit float PCM WAV：
+
+```text
+ffmpeg -i input -ar 16000 -ac 1 -c:a pcm_f32le output.wav
+```
+
+本地同语言识别不需要 API Key；本地跨语言会在 ASR 后调用 DashScope 纯文本翻译，因此仍需要 API Key。
+
+字幕翻译模型使用 GGUF 文件，保存在 app data 的 `llm-models/` 下。
+
+llama.cpp server 生命周期 command 已接入，sidecar 名称为 `binaries/llama-server`。需要本地字幕翻译或 `cloud-then-local` fallback 时，开发机必须准备 `llama-server` 可执行文件；只做云端翻译、Whisper ASR、模型下载管理时不需要。
+
+### 6.2 llama-server sidecar 准备
+
+本项目通过 Tauri sidecar 启动 llama.cpp 的 OpenAI-compatible server：
+
+```text
+binaries/llama-server --host 127.0.0.1 --port 39117 --model <app-data>/llm-models/*.gguf --ctx-size 4096
+```
+
+Tauri 配置使用未带平台后缀的 sidecar 名称：
+
+```json
+"externalBin": ["binaries/ffmpeg", "binaries/llama-server"]
+```
+
+实际文件必须按目标平台命名后放在 `src-tauri/binaries/` 下：
+
+- macOS Apple Silicon：`src-tauri/binaries/llama-server-aarch64-apple-darwin`
+- macOS Intel：`src-tauri/binaries/llama-server-x86_64-apple-darwin`
+- Windows x64：`src-tauri/binaries/llama-server-x86_64-pc-windows-msvc.exe`
+- Linux x64：`src-tauri/binaries/llama-server-x86_64-unknown-linux-gnu`
+
+macOS Apple Silicon 获取方式：
+
+1. 官方 release 包：打开 `https://github.com/ggml-org/llama.cpp/releases`，下载 `llama-*-bin-macos-arm64.tar.gz`。
+2. 解压后复制 `llama-server` 为 `src-tauri/binaries/llama-server-aarch64-apple-darwin`。
+3. 同包里的 `lib*.dylib` 也要放到 `src-tauri/binaries/`，否则启动时可能报 `Library not loaded`。
+4. 执行 `chmod +x src-tauri/binaries/llama-server-aarch64-apple-darwin`。
+
+开发机也可以用 Homebrew 先验证本机是否能运行：
+
+```bash
+brew install llama.cpp
+llama-server --version
+```
+
+如果要把 Homebrew 的 `llama-server` 复制成 sidecar，需要同时处理它依赖的动态库和 rpath；更推荐使用官方 release 包或后续写专门脚本统一处理。
+
+Windows x64 获取方式：
+
+1. 官方 release 包：打开 `https://github.com/ggml-org/llama.cpp/releases`。
+2. 优先下载 CPU 通用包 `llama-*-bin-win-cpu-x64.zip`；只有确认显卡驱动、CUDA/Vulkan 运行库匹配时，再选择 CUDA/Vulkan 包。
+3. 解压后复制 `llama-server.exe` 为 `src-tauri/binaries/llama-server-x86_64-pc-windows-msvc.exe`。
+4. 同包里的 `*.dll` 也要放到 `src-tauri/binaries/`，否则启动时可能报 DLL 缺失。
+5. 在 PowerShell 中验证：
+
+```powershell
+.\src-tauri\binaries\llama-server-x86_64-pc-windows-msvc.exe --version
+```
+
+Windows 示例命令：
+
+```powershell
+Expand-Archive .\llama-*-bin-win-cpu-x64.zip -DestinationPath .\llama
+Copy-Item .\llama\llama-*\llama-server.exe .\src-tauri\binaries\llama-server-x86_64-pc-windows-msvc.exe
+Copy-Item .\llama\llama-*\*.dll .\src-tauri\binaries\
+```
+
+二进制准备好后再把 `binaries/llama-server` 加入 `src-tauri/tauri.conf.json` 的 `bundle.externalBin`。如果文件不存在就加入，Tauri 构建会因为 sidecar 资源缺失而失败。
+
+本地字幕翻译 fallback 已接入 `local_pipeline_translate`：
+
+- `cloud-only`：只调用 DashScope 文本翻译。
+- `cloud-then-local`：DashScope 返回 `DataInspectionFailed` 时切到本地 llama-server。
+- `local-only`：跳过 DashScope，直接调用本地 llama-server。
+
+常见失败：
+
+- `启动 llama-server 失败: No such file or directory (os error 2)`：`src-tauri/binaries/llama-server-{target-triple}` 不存在，或 `externalBin` 已配置但对应文件没放好。
+- `Library not loaded`：只复制了 `llama-server`，没有复制 release 包里的 `.dylib`。
+- Windows 报 DLL 缺失：只复制了 `llama-server.exe`，没有复制 release 包里的 `.dll`，或选择了 CUDA/Vulkan 包但本机运行库不匹配。
+- 进程立刻退出，退出码类似 `137`，macOS 日志出现 `AMFI`、`XprotectService`、`Gatekeeper`，或 Windows 安全中心/企业安全软件提示拦截：通常是系统安全策略、公司安全软件或下载来源校验拦截。此时不是代码参数问题，需要换本机编译/包管理器版本，或按公司安全策略放行。
+
+注意：在 `llama-server-{target-triple}` 二进制实际放入前，本地翻译路径启动失败是预期状态。
 
 ## 7. 事件约定
 
@@ -179,6 +286,7 @@ Rust 通过 Tauri event 向前端推送翻译过程。
 - `translate-chunk`
 - `translate-error`
 - `translate-done`
+- `model-download-progress`
 
 payload 格式：
 
@@ -290,6 +398,8 @@ showMessage({
 - `services/pipelineSession.test.ts`
 - Rust `prompt.rs` tests
 - Rust `file_ops.rs` tests
+- Rust `whisper.rs` tests
+- Rust `providers/text_translate.rs` tests
 
 新增以下逻辑时应补测试：
 
@@ -305,5 +415,14 @@ showMessage({
 - Rust 使用 `cargo fmt`。
 - JS/TS 使用 ESLint。
 - Rust 使用 clippy 且要求 `-D warnings`。
+
+提交前建议跑：
+
+```bash
+npm run build
+npm test
+cd src-tauri && cargo test
+cd src-tauri && cargo clippy -- -D warnings
+```
 
 不要为了通过 lint 引入宽泛 `any` 或静默吞错。确实需要动态类型时，优先写局部类型、type guard 或 `unknown`。

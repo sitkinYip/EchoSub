@@ -36,6 +36,20 @@ export const NAV_ITEMS: { path: string; label: string; icon: IconName }[] = [
   { path: "/player", label: "播放器", icon: "player" },
 ];
 
+export type TranslateEngine = "cloud" | "local";
+export type TranslationFallback = "cloud-only" | "cloud-then-local" | "local-only";
+
+export const ENGINE_LABELS: Record<TranslateEngine, string> = {
+  cloud: "云端",
+  local: "本地",
+};
+
+export const TRANSLATION_FALLBACK_LABELS: Record<TranslationFallback, string> = {
+  "cloud-only": "仅云端",
+  "cloud-then-local": "云端失败后本地",
+  "local-only": "仅本地",
+};
+
 export type IconName =
   | "logo"
   | "translate"
@@ -43,6 +57,9 @@ export type IconName =
   | "player"
   | "settings"
   | "download"
+  | "download-cloud"
+  | "trash"
+  | "cpu"
   | "arrow-right"
   | "check"
   | "close"

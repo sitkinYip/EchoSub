@@ -3,6 +3,7 @@ import { Store } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
 import type { Language } from "@/types";
 import type { Theme } from "@/config/theme";
+import type { TranslateEngine, TranslationFallback } from "@/config";
 
 interface SettingsState {
   apiKey: string;
@@ -10,13 +11,32 @@ interface SettingsState {
   sourceLang: Language;
   targetLang: Language;
   uploadVideo: boolean;
+  engine: TranslateEngine;
+  translationFallback: TranslationFallback;
+  whisperModelId: string;
+  whisperModelPath: string;
+  translateModelId: string;
+  translateModelPath: string;
   theme: Theme;
   loaded: boolean;
 
   load: () => Promise<void>;
   update: (
     partial: Partial<
-      Pick<SettingsState, "apiKey" | "sourceLang" | "targetLang" | "uploadVideo" | "theme">
+      Pick<
+        SettingsState,
+        | "apiKey"
+        | "sourceLang"
+        | "targetLang"
+        | "uploadVideo"
+        | "engine"
+        | "translationFallback"
+        | "whisperModelId"
+        | "whisperModelPath"
+        | "translateModelId"
+        | "translateModelPath"
+        | "theme"
+      >
     >,
   ) => Promise<void>;
 }
@@ -27,16 +47,39 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   sourceLang: "日语",
   targetLang: "中文",
   uploadVideo: false,
+  engine: "cloud",
+  translationFallback: "cloud-then-local",
+  whisperModelId: "base",
+  whisperModelPath: "",
+  translateModelId: "qwen3-4b-instruct-q4",
+  translateModelPath: "",
   theme: "dark",
   loaded: false,
 
   load: async () => {
     try {
       const store = await Store.load("config.json");
-      const [sourceLang, targetLang, uploadVideo, theme] = await Promise.all([
+      const [
+        sourceLang,
+        targetLang,
+        uploadVideo,
+        engine,
+        translationFallback,
+        whisperModelId,
+        whisperModelPath,
+        translateModelId,
+        translateModelPath,
+        theme,
+      ] = await Promise.all([
         store.get<string>("sourceLang"),
         store.get<string>("targetLang"),
         store.get<boolean>("uploadVideo"),
+        store.get<TranslateEngine>("engine"),
+        store.get<TranslationFallback>("translationFallback"),
+        store.get<string>("whisperModelId"),
+        store.get<string>("whisperModelPath"),
+        store.get<string>("translateModelId"),
+        store.get<string>("translateModelPath"),
         store.get<Theme>("theme"),
       ]);
 
@@ -55,6 +98,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         sourceLang: (sourceLang as Language) || "日语",
         targetLang: (targetLang as Language) || "中文",
         uploadVideo: uploadVideo ?? false,
+        engine: engine || "cloud",
+        translationFallback: translationFallback || "cloud-then-local",
+        whisperModelId: whisperModelId || "base",
+        whisperModelPath: whisperModelPath || "",
+        translateModelId: translateModelId || "qwen3-4b-instruct-q4",
+        translateModelPath: translateModelPath || "",
         theme: theme || "dark",
         loaded: true,
       });
@@ -82,6 +131,19 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     if (partial.sourceLang !== undefined) configPartial.sourceLang = partial.sourceLang;
     if (partial.targetLang !== undefined) configPartial.targetLang = partial.targetLang;
     if (partial.uploadVideo !== undefined) configPartial.uploadVideo = partial.uploadVideo;
+    if (partial.engine !== undefined) configPartial.engine = partial.engine;
+    if (partial.translationFallback !== undefined) {
+      configPartial.translationFallback = partial.translationFallback;
+    }
+    if (partial.whisperModelId !== undefined) configPartial.whisperModelId = partial.whisperModelId;
+    if (partial.whisperModelPath !== undefined) {
+      configPartial.whisperModelPath = partial.whisperModelPath;
+    }
+    if (partial.translateModelId !== undefined)
+      configPartial.translateModelId = partial.translateModelId;
+    if (partial.translateModelPath !== undefined) {
+      configPartial.translateModelPath = partial.translateModelPath;
+    }
     if (partial.theme !== undefined) configPartial.theme = partial.theme;
 
     if (Object.keys(configPartial).length > 0) {

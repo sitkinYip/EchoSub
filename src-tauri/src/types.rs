@@ -24,6 +24,19 @@ pub struct TranslateRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPipelineRequest {
+    pub task_id: String,
+    pub wav_path: String,
+    pub model_path: String,
+    pub translate_model_path: Option<String>,
+    pub api_key: Option<String>,
+    pub source_lang: String,
+    pub target_lang: String,
+    pub translation_fallback: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct UploadPolicyData {
     pub upload_host: String,
     pub upload_dir: String,

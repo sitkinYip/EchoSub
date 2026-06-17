@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { SubtitleItem, Language } from "@/types";
 import { startPipeline, resetPipeline, cancelPipeline } from "@/services/translateService";
+import type { TranslateEngine, TranslationFallback } from "@/config";
 
 export type PipelinePhase = "extracting" | "uploading" | "translating";
 
@@ -16,6 +17,8 @@ export interface TranslationState {
   regenerate: {
     videoPath: string;
     videoName: string;
+    fileHash?: string;
+    replaceHistoryId?: string;
     sourceLang: Language;
     targetLang: Language;
     uploadVideo: boolean;
@@ -30,6 +33,12 @@ export interface TranslationActions {
     apiKey: string,
     sourceLang: Language,
     targetLang: Language,
+    engine?: TranslateEngine,
+    whisperModelPath?: string,
+    translationFallback?: TranslationFallback,
+    translateModelPath?: string,
+    fileHash?: string,
+    replaceHistoryId?: string,
   ) => void;
   cancel: () => void;
   reset: () => void;
@@ -49,8 +58,34 @@ export const useTranslationStore = create<TranslationState & TranslationActions>
   subtitleItems: [],
   regenerate: null,
 
-  startPipeline: (filePath, fileName, mode, apiKey, sourceLang, targetLang) => {
-    startPipeline(filePath, fileName, mode, apiKey, sourceLang, targetLang);
+  startPipeline: (
+    filePath,
+    fileName,
+    mode,
+    apiKey,
+    sourceLang,
+    targetLang,
+    engine,
+    modelPath,
+    translationFallback,
+    translateModelPath,
+    fileHash,
+    replaceHistoryId,
+  ) => {
+    startPipeline(
+      filePath,
+      fileName,
+      mode,
+      apiKey,
+      sourceLang,
+      targetLang,
+      engine,
+      modelPath,
+      translationFallback,
+      translateModelPath,
+      fileHash,
+      replaceHistoryId,
+    );
   },
 
   cancel: () => {

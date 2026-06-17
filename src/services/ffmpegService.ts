@@ -140,3 +140,30 @@ export async function runExtractAudio(
     set,
   );
 }
+
+/**
+ * 提取 16kHz 单声道 f32 PCM WAV —— whisper.cpp 的输入格式要求。
+ * 仅本地 Whisper 引擎使用；云端管线仍走 runExtractAudio（mp3）。
+ */
+export async function runExtractWav16kMono(
+  sourcePath: string,
+  outputPath: string,
+  set: SetState,
+): Promise<boolean> {
+  return runFfmpeg(
+    [
+      "-i",
+      sourcePath,
+      "-ar",
+      "16000", // 16 kHz
+      "-ac",
+      "1", // 单声道
+      "-c:a",
+      "pcm_f32le", // 32-bit float little-endian PCM
+      "-y",
+      outputPath,
+    ],
+    "提取 16kHz 音频中...",
+    set,
+  );
+}

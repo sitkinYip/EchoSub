@@ -48,7 +48,8 @@ mod tests {
 
     #[test]
     fn builds_audio_request_body() {
-        let body = build_chat_request_body("oss://bucket/audio.mp3", "audio", "日语", "中文", "prompt");
+        let body =
+            build_chat_request_body("oss://bucket/audio.mp3", "audio", "日语", "中文", "prompt");
 
         assert_eq!(body["model"], DEFAULT_MODEL);
         assert_eq!(body["metadata"]["provider"], PROVIDER_ID);
@@ -60,7 +61,8 @@ mod tests {
 
     #[test]
     fn builds_video_request_body() {
-        let body = build_chat_request_body("oss://bucket/video.mp4", "video", "英语", "中文", "prompt");
+        let body =
+            build_chat_request_body("oss://bucket/video.mp4", "video", "英语", "中文", "prompt");
 
         assert_eq!(
             body["messages"][0]["content"][0]["video_url"]["url"],

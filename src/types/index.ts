@@ -17,6 +17,7 @@ export interface HistoryEntry {
   createdAt: number;
   videoName: string;
   videoPath: string;
+  fileHash?: string;
   sourceLang: Language;
   targetLang: Language;
   mode: "audio" | "video";

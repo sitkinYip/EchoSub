@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useNavigate } from "react-router-dom";
 import DropZone from "@/components/DropZone";
 import SubtitlePreview from "@/components/SubtitlePreview";
 import ExportButton from "@/components/ExportButton";
@@ -13,12 +15,34 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useTranslationStore } from "@/stores/translationStore";
 import { useHistoryStore } from "@/stores/historyStore";
 import { LANGUAGES, SUPPORTED_AUDIO_EXTS, ALL_SUPPORTED_EXTS } from "@/config";
-import type { Language, VideoFile } from "@/types";
+import type { HistoryEntry, Language } from "@/types";
+
+type PendingFile = {
+  name: string;
+  path: string;
+  hash?: string;
+  replaceHistoryId?: string;
+};
 
 export default function TranslatePage() {
+  const navigate = useNavigate();
   const s = useSettingsStore();
   const t = useTranslationStore();
-  const { apiKey, hasApiKey, sourceLang, targetLang, uploadVideo, loaded, update } = s;
+  const {
+    apiKey,
+    hasApiKey,
+    sourceLang,
+    targetLang,
+    uploadVideo,
+    engine,
+    translationFallback,
+    whisperModelId,
+    whisperModelPath,
+    translateModelId,
+    translateModelPath,
+    loaded,
+    update,
+  } = s;
   const {
     appStep,
     pipelinePhase,
@@ -34,7 +58,7 @@ export default function TranslatePage() {
   } = t;
 
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const pendingRef = useRef<VideoFile | null>(null);
+  const pendingRef = useRef<PendingFile | null>(null);
   const modeLabel = uploadVideo ? "视频" : "音频";
 
   useEffect(() => {
@@ -43,12 +67,56 @@ export default function TranslatePage() {
   }, []);
 
   const doStart = useCallback(
-    (fp: string, fn: string, forceMode?: "audio" | "video") => {
+    (
+      fp: string,
+      fn: string,
+      forceMode?: "audio" | "video",
+      fileHash?: string,
+      replaceHistoryId?: string,
+    ) => {
       const st = useSettingsStore.getState();
       const mode = forceMode || (st.uploadVideo ? "video" : "audio");
-      startPipeline(fp, fn, mode, st.apiKey, st.sourceLang, st.targetLang);
+      startPipeline(
+        fp,
+        fn,
+        mode,
+        st.apiKey,
+        st.sourceLang,
+        st.targetLang,
+        st.engine,
+        st.whisperModelPath,
+        st.translationFallback,
+        st.translateModelPath,
+        fileHash,
+        replaceHistoryId,
+      );
     },
     [startPipeline],
+  );
+
+  const findDuplicateEntry = useCallback(
+    async (
+      fileHash: string,
+      mode: "audio" | "video",
+      source: Language,
+      target: Language,
+      replaceHistoryId?: string,
+    ): Promise<HistoryEntry | null> => {
+      const historyStore = useHistoryStore.getState();
+      await historyStore.load();
+      return (
+        historyStore.history.find(
+          (entry) =>
+            entry.id !== replaceHistoryId &&
+            entry.status === "completed" &&
+            entry.fileHash === fileHash &&
+            entry.mode === mode &&
+            entry.sourceLang === source &&
+            entry.targetLang === target,
+        ) || null
+      );
+    },
+    [],
   );
 
   // Handle regeneration from history
@@ -62,11 +130,46 @@ export default function TranslatePage() {
     });
     t.clearRegenerate();
     t.reset();
-    doStart(regen.videoPath, regen.videoName, regen.uploadVideo ? "video" : "audio");
-  }, [t.regenerate, apiKey, appStep, doStart, update]);
+    (async () => {
+      let fileHash = regen.fileHash;
+      if (!fileHash) {
+        fileHash = (await invoke("calculate_file_hash", { path: regen.videoPath })) as string;
+      }
+      const mode = regen.uploadVideo ? "video" : "audio";
+      const duplicate = await findDuplicateEntry(
+        fileHash,
+        mode,
+        regen.sourceLang,
+        regen.targetLang,
+        regen.replaceHistoryId,
+      );
+      if (duplicate) {
+        showModal("DuplicateTranslation", {
+          entry: duplicate,
+          onViewHistory: () => navigate("/history"),
+          onRetranslate: () =>
+            doStart(
+              regen.videoPath,
+              regen.videoName,
+              mode,
+              fileHash,
+              regen.replaceHistoryId || duplicate.id,
+            ),
+        });
+        return;
+      }
+      doStart(regen.videoPath, regen.videoName, mode, fileHash, regen.replaceHistoryId);
+    })().catch((err) => {
+      showMessage({
+        type: "error",
+        title: "文件校验失败",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }, [t.regenerate, apiKey, appStep, doStart, update, findDuplicateEntry, navigate]);
 
   const onFile = useCallback(
-    (fp: string, fn: string) => {
+    async (fp: string, fn: string) => {
       // Block unsupported formats
       const ext = fn.split(".").pop()?.toLowerCase() || "";
       if (!ALL_SUPPORTED_EXTS.includes(ext)) {
@@ -79,8 +182,72 @@ export default function TranslatePage() {
       }
       // Audio-only files always go audio mode
       const isAudio = SUPPORTED_AUDIO_EXTS.includes(ext);
-      if (!apiKey) {
-        pendingRef.current = { name: fn, path: fp };
+      const effectiveMode = isAudio ? "audio" : uploadVideo ? "video" : "audio";
+      let fileHash: string;
+      try {
+        fileHash = (await invoke("calculate_file_hash", { path: fp })) as string;
+      } catch (err) {
+        showMessage({
+          type: "error",
+          title: "文件校验失败",
+          description: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+
+      const duplicate = await findDuplicateEntry(fileHash, effectiveMode, sourceLang, targetLang);
+      if (duplicate) {
+        showModal("DuplicateTranslation", {
+          entry: duplicate,
+          onViewHistory: () => navigate("/history"),
+          onRetranslate: () => doStart(fp, fn, effectiveMode, fileHash, duplicate.id),
+        });
+        return;
+      }
+
+      const needsApiKey =
+        engine === "cloud" || (sourceLang !== targetLang && translationFallback !== "local-only");
+      if (engine === "local" && !whisperModelPath) {
+        showModal("ModelManager", {
+          initialTab: "whisper",
+          selectedId: whisperModelId,
+          selectedPath: whisperModelPath,
+          selectedTranslateId: translateModelId,
+          selectedTranslatePath: translateModelPath,
+          onSelected: async (model: { id: string; path: string }) => {
+            await update({ whisperModelId: model.id, whisperModelPath: model.path });
+            doStart(fp, fn, effectiveMode, fileHash);
+          },
+          onTranslateSelected: async (model: { id: string; path: string }) => {
+            await update({ translateModelId: model.id, translateModelPath: model.path });
+          },
+        });
+        return;
+      }
+      if (
+        engine === "local" &&
+        sourceLang !== targetLang &&
+        translationFallback === "local-only" &&
+        !translateModelPath
+      ) {
+        showModal("ModelManager", {
+          initialTab: "translate",
+          selectedId: whisperModelId,
+          selectedPath: whisperModelPath,
+          selectedTranslateId: translateModelId,
+          selectedTranslatePath: translateModelPath,
+          onSelected: async (model: { id: string; path: string }) => {
+            await update({ whisperModelId: model.id, whisperModelPath: model.path });
+          },
+          onTranslateSelected: async (model: { id: string; path: string }) => {
+            await update({ translateModelId: model.id, translateModelPath: model.path });
+            doStart(fp, fn, effectiveMode, fileHash);
+          },
+        });
+        return;
+      }
+      if (needsApiKey && !apiKey) {
+        pendingRef.current = { name: fn, path: fp, hash: fileHash };
         showModal("ApiKey", {
           onCancel: () => {
             pendingRef.current = null;
@@ -90,16 +257,31 @@ export default function TranslatePage() {
             const p = pendingRef.current;
             if (p) {
               pendingRef.current = null;
-              doStart(p.path, p.name);
+              doStart(p.path, p.name, effectiveMode, p.hash, p.replaceHistoryId);
             }
           },
         });
         return;
       }
       pendingRef.current = null;
-      doStart(fp, fn, isAudio ? "audio" : undefined);
+      doStart(fp, fn, effectiveMode, fileHash);
     },
-    [apiKey, doStart],
+    [
+      apiKey,
+      doStart,
+      engine,
+      findDuplicateEntry,
+      navigate,
+      sourceLang,
+      targetLang,
+      translationFallback,
+      translateModelId,
+      translateModelPath,
+      whisperModelId,
+      whisperModelPath,
+      uploadVideo,
+      update,
+    ],
   );
 
   return (
@@ -265,6 +447,20 @@ export default function TranslatePage() {
               onSourceLangChange={(l) => update({ sourceLang: l })}
               onTargetLangChange={(l) => update({ targetLang: l })}
               apiKey={apiKey}
+              engine={engine}
+              onEngineChange={(value) => update({ engine: value })}
+              translationFallback={translationFallback}
+              onTranslationFallbackChange={(value) => update({ translationFallback: value })}
+              whisperModelId={whisperModelId}
+              whisperModelPath={whisperModelPath}
+              onWhisperModelChange={(id, path) =>
+                update({ whisperModelId: id, whisperModelPath: path })
+              }
+              translateModelId={translateModelId}
+              translateModelPath={translateModelPath}
+              onTranslateModelChange={(id, path) =>
+                update({ translateModelId: id, translateModelPath: path })
+              }
               onApiKeyChange={(k) => update({ apiKey: k })}
               onClose={() => setSettingsOpen(false)}
             />

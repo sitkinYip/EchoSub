@@ -459,7 +459,7 @@ interface HistoryEntry {
 Tauri 配置：
 
 - CSP 已启用。
-- HTTP 仅允许 DashScope 域名。
+- HTTP 仅允许 DashScope 域名和 HuggingFace 模型下载域名。
 - FFmpeg 只通过 sidecar allow-list 执行。
 - 前端 fs 权限不包含 `$HOME/**` 全局写入。
 - asset protocol 允许读取 app 目录和常见用户媒体位置，用于播放器 `convertFileSrc`。
@@ -468,9 +468,78 @@ Rust 边界：
 
 - 自定义 command 对删除操作做路径约束。
 - API Key 文件不进 store，不进 history。
-- 上传使用 streaming，避免大文件读入 JS 或 Rust 内存。
+- 上传和模型下载使用 streaming，避免大文件读入 JS 或 Rust 内存。
 
-## 12. 测试覆盖
+## 12. 本地 Whisper 引擎
+
+本地模式用于离线语音识别，解决私人化音视频上传到云端模型时可能触发审核的问题。
+
+核心文件：
+
+- `src-tauri/src/whisper.rs`：whisper-rs 推理、WAV 读取、SRT 生成。
+- `src-tauri/src/model_manager.rs`：模型列表、下载、删除、路径校验。
+- `src-tauri/src/providers/text_translate.rs`：本地 ASR 后的纯文本字幕翻译。
+- `src/services/translateService.ts`：云端/本地管线分流。
+- `src/services/whisperService.ts`：前端模型管理 command 封装。
+
+模型位置：
+
+```text
+app.path().app_data_dir()/models/*.bin
+app.path().app_data_dir()/llm-models/*.gguf
+```
+
+本地管线：
+
+```text
+startPipeline(engine = local)
+  -> create_temp_media_path("wav")
+  -> ffmpeg -ar 16000 -ac 1 -c:a pcm_f32le
+  -> local_pipeline_translate(taskId, wavPath, modelPath, sourceLang, targetLang, apiKey?)
+      -> spawn_blocking Whisper ASR
+      -> source == target: emit translate-chunk(SRT), translate-done
+      -> source != target:
+          cloud-only: DashScope text_translate streams translated SRT chunks
+          cloud-then-local: try DashScope; on DataInspectionFailed use local llama-server
+          local-only: use local llama-server directly
+  -> parse SRT
+  -> write_subtitle_file
+  -> historyStore.prepend
+  -> preview
+```
+
+新增 commands：
+
+- `list_whisper_models() -> WhisperModel[]`
+- `get_local_whisper_models() -> LocalWhisperModel[]`
+- `download_whisper_model(id) -> path`
+- `delete_whisper_model(path)`
+- `check_whisper_model_exists(id) -> bool`
+- `list_translate_models() -> TranslateModel[]`
+- `get_local_translate_models() -> LocalTranslateModel[]`
+- `download_translate_model(id) -> path`
+- `delete_translate_model(path)`
+- `check_translate_model_exists(id) -> bool`
+- `start_local_llm_server(req) -> LocalLlmServerStatus`
+- `stop_local_llm_server()`
+- `get_local_llm_server_status() -> LocalLlmServerStatus`
+- `local_pipeline_translate(req)`
+
+本地字幕翻译不会让模型直接输出完整 SRT。Rust 会先把 SRT 解析成字幕块，再按条数/字符数分批发送正文 JSON，要求模型返回 `{ id, translation }[]`，最后由 `srt_batch.rs` 重建时间轴。
+
+本地 LLM 翻译依赖 llama.cpp `llama-server` sidecar。运行时通过 Tauri sidecar 名称 `binaries/llama-server` 启动，实际文件需按平台放在 `src-tauri/binaries/llama-server-{target-triple}`。macOS release 包需要把同包 `lib*.dylib` 放在同目录；Windows release 包需要把同包 `*.dll` 放在同目录。缺少二进制时，本地翻译会在启动阶段返回 `No such file or directory (os error 2)`。
+
+事件：
+
+- 翻译任务继续复用 `translate-progress/chunk/error/done` 和 `TaskEvent<T>`。
+- 模型下载使用 `model-download-progress`，payload 为 `{ id, downloaded, total?, percent? }`。
+
+取消：
+
+- 前端 `killSession()` 会调用 `cancel_task(taskId)`、停止 FFmpeg、删除登记的临时 WAV。
+- Whisper 推理本身不可抢占中断；推理前后和 segment 遍历期间检查取消状态。
+
+## 13. 测试覆盖
 
 前端：
 
@@ -481,6 +550,8 @@ Rust：
 
 - `prompt.rs` prompt 分支。
 - `file_ops.rs` 字幕 ID 校验。
+- `whisper.rs` 语言映射和 SRT 时间码。
+- `providers/text_translate.rs` 纯文本翻译 prompt 约束。
 
 建议后续补充：
 

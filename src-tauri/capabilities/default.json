@@ -12,6 +12,11 @@
           "name": "binaries/ffmpeg",
           "sidecar": true,
           "args": true
+        },
+        {
+          "name": "binaries/llama-server",
+          "sidecar": true,
+          "args": true
         }
       ]
     },
@@ -20,6 +25,11 @@
       "allow": [
         {
           "name": "binaries/ffmpeg",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "binaries/llama-server",
           "sidecar": true,
           "args": true
         }
@@ -51,7 +61,10 @@
     "store:default",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://dashscope.aliyuncs.com/**" }]
+      "allow": [
+        { "url": "https://dashscope.aliyuncs.com/**" },
+        { "url": "https://huggingface.co/**" }
+      ]
     }
   ]
 }

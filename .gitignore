@@ -8,8 +8,11 @@ node_modules/
 # ── Tauri generated files (regenerated on build) ─
 /src-tauri/gen/
 
-# ── FFmpeg binary (too large, download separately) ─
+# ── Sidecar binaries (too large, download separately) ─
 /src-tauri/binaries/ffmpeg-*
+/src-tauri/binaries/llama-server-*
+/src-tauri/binaries/*.dylib
+/src-tauri/binaries/*.dll
 !/src-tauri/binaries/.gitkeep
 
 # ── macOS ────────────────────────────────────────
