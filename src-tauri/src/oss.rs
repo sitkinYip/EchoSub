@@ -1,3 +1,4 @@
+use crate::providers::dashscope;
 use crate::state::AppState;
 use crate::types::{TaskEvent, UploadPolicyResponse};
 use std::fs;
@@ -49,10 +50,10 @@ pub async fn upload_to_dashscope_oss(
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
     let policy_resp = client
-        .get("https://dashscope.aliyuncs.com/api/v1/uploads")
+        .get(dashscope::UPLOAD_POLICY_URL)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
-        .query(&[("action", "getPolicy"), ("model", "qwen3.5-omni-plus")])
+        .query(&dashscope::upload_policy_query())
         .send()
         .await
         .map_err(|e| format!("获取上传凭证失败: {e}"))?;

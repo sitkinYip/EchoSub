@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Emitter, State};
 
 use crate::prompt::build_prompt;
+use crate::providers::dashscope;
 use crate::state::AppState;
 use crate::types::{TaskEvent, TranslateRequest};
 
@@ -27,30 +28,13 @@ pub async fn stream_translate(
     let task_id = req.task_id.clone();
     let is_video = req.media_type == "video";
     let prompt = build_prompt(&req.source_lang, &req.target_lang, is_video);
-    let ext = if is_video { "mp4" } else { "mp3" };
 
-    let media_entry = if is_video {
-        serde_json::json!({ "type": "video_url", "video_url": { "url": req.oss_url } })
-    } else {
-        serde_json::json!({ "type": "input_audio", "input_audio": { "data": req.oss_url, "format": ext } })
-    };
-
-    let request_body = serde_json::json!({
-        "model": "qwen3.5-omni-plus",
-        "messages": [{
-            "role": "user",
-            "content": [media_entry, { "type": "text", "text": prompt }]
-        }],
-        "temperature": 0.1,
-        "top_p": 0.1,
-        "stream": true,
-        "stream_options": { "include_usage": true },
-        "modalities": ["text"]
-    });
+    let request_body =
+        dashscope::build_chat_request_body(&req.oss_url, &req.media_type, &req.source_lang, &req.target_lang, &prompt);
 
     let body = request_body.to_string();
     crate::debug!("===== [Rust stream] REQUEST =====");
-    crate::debug!("model: qwen3.5-omni-plus");
+    crate::debug!("model: {}", dashscope::DEFAULT_MODEL);
     crate::debug!("source: {} → target: {}", req.source_lang, req.target_lang);
     crate::debug!("media_type: {}", req.media_type);
     crate::debug!("prompt ({} chars)", prompt.len());
@@ -74,7 +58,7 @@ pub async fn stream_translate(
     }
 
     let response = client
-        .post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+        .post(dashscope::CHAT_COMPLETIONS_URL)
         .header("Authorization", format!("Bearer {}", req.api_key))
         .header("Content-Type", "application/json")
         .header("X-DashScope-OssResourceResolve", "enable")

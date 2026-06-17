@@ -2,6 +2,7 @@
 mod file_ops;
 mod oss;
 mod prompt;
+mod providers;
 mod state;
 mod translate;
 mod types;
