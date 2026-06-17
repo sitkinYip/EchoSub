@@ -6,7 +6,13 @@ import { parseModelOutputWithWarnings } from "@/utils/srtParser";
 import { showModal } from "@/components/Modal/create";
 import { showMessage } from "@/components/Toast/create";
 import { runFfmpeg, runExtractAudio, runExtractWav16kMono } from "./ffmpegService";
-import { probe, formatDuration, picks, MAX_DURATION_SECONDS } from "./mediaService";
+import {
+  probe,
+  formatDuration,
+  formatMediaSummary,
+  picks,
+  MAX_DURATION_SECONDS,
+} from "./mediaService";
 import {
   createTempPath,
   isAlive,
@@ -148,7 +154,7 @@ export function startPipeline(
 
       const meta = await probe(filePath);
       const sizeMB = (meta.size / 1024 / 1024).toFixed(1);
-      get().completePipelineStep("analyze-file", `时长 ${formatDuration(meta.durationSeconds)}`);
+      get().completePipelineStep("analyze-file", formatMediaSummary(meta));
 
       if (meta.durationSeconds > MAX_DURATION_SECONDS) {
         showMessage({
@@ -309,7 +315,7 @@ export function startLocalPipeline(
       }
 
       const meta = await probe(filePath);
-      get().completePipelineStep("analyze-file", `时长 ${formatDuration(meta.durationSeconds)}`);
+      get().completePipelineStep("analyze-file", formatMediaSummary(meta));
       if (meta.durationSeconds > MAX_DURATION_SECONDS) {
         showMessage({
           type: "error",

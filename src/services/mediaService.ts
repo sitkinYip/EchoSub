@@ -17,23 +17,35 @@ export async function probe(filePath: string): Promise<MediaMeta> {
       size: number;
     };
     result.size = info.size;
-    const cmd = Command.sidecar("binaries/ffmpeg", ["-i", filePath]);
+    const cmd = Command.sidecar("binaries/ffmpeg", ["-hide_banner", "-i", filePath]);
     let stderr = "";
+    let stdout = "";
     cmd.stderr.on("data", (d: string) => {
       stderr += d;
     });
-    await cmd.execute().catch(() => {});
-    const resMatch = stderr.match(/(\d{2,4})x(\d{2,4})/);
+    cmd.stdout.on("data", (d: string) => {
+      stdout += d;
+    });
+    const output = await cmd.execute().catch((err: unknown) => {
+      console.debug("[probe] ffmpeg probe exited with error:", err);
+      return null;
+    });
+    if (output) {
+      stderr += output.stderr || "";
+      stdout += output.stdout || "";
+    }
+
+    const probeText = `${stderr}\n${stdout}`;
+    const resMatch = probeText.match(/(\d{2,5})x(\d{2,5})/);
     if (resMatch) {
       result.width = parseInt(resMatch[1], 10);
       result.height = parseInt(resMatch[2], 10);
     }
-    const durMatch = stderr.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
+    const durMatch = probeText.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
     if (durMatch) {
-      result.durationSeconds =
-        parseInt(durMatch[1], 10) * 3600 +
-        parseInt(durMatch[2], 10) * 60 +
-        parseInt(durMatch[3], 10);
+      const seconds =
+        parseInt(durMatch[1], 10) * 3600 + parseInt(durMatch[2], 10) * 60 + parseFloat(durMatch[3]);
+      result.durationSeconds = seconds > 0 ? Math.max(1, Math.round(seconds)) : 0;
     }
   } catch (err) {
     console.warn("[probe] 文件探测失败:", err);
@@ -47,6 +59,14 @@ export function formatDuration(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return h > 0 ? `${h} 小时 ${m} 分 ${s} 秒` : `${m} 分 ${s} 秒`;
+}
+
+export function formatMediaSummary(meta: Pick<MediaMeta, "durationSeconds" | "size">): string {
+  const sizeMB = (meta.size / 1024 / 1024).toFixed(1);
+  if (meta.durationSeconds > 0) {
+    return `时长 ${formatDuration(meta.durationSeconds)}，大小 ${sizeMB} MB`;
+  }
+  return `大小 ${sizeMB} MB，时长暂未识别`;
 }
 
 export function picks(srcHeight: number): { pass1Scale: string; pass1Label: string } {
