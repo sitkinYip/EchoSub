@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { SubtitleItem, Language, HistoryEntry } from "@/types";
+import type { Language } from "@/types";
 import { MAX_DIRECT_UPLOAD_BYTES, SUPPORTED_AUDIO_EXTS } from "@/config";
-import { parseModelOutputWithWarnings, itemsToSrt } from "@/utils/srtParser";
+import { parseModelOutputWithWarnings } from "@/utils/srtParser";
 import { showModal } from "@/components/Modal/create";
 import { showMessage } from "@/components/Toast/create";
 import { runFfmpeg, runExtractAudio, runExtractWav16kMono } from "./ffmpegService";
@@ -18,7 +18,6 @@ import {
   type PipelineSession,
 } from "./pipelineSession";
 import { useTranslationStore } from "@/stores/translationStore";
-import { useHistoryStore } from "@/stores/historyStore";
 import type { TranslationState, TranslationActions } from "@/stores/translationStore";
 import type { TranslateEngine, TranslationFallback } from "@/config";
 import {
@@ -42,43 +41,6 @@ type PendingCtx = {
   resolution: { width: number; height: number; size: number };
 };
 
-function makeEntry(
-  videoFile: { name: string; path: string } | null,
-  subtitleItems: SubtitleItem[],
-  sourceLang: Language,
-  targetLang: Language,
-  mediaType: "audio" | "video",
-  status: "completed" | "error",
-  error?: string,
-  id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-  subtitleFilePath?: string,
-  fileHash?: string,
-): HistoryEntry {
-  return {
-    id,
-    createdAt: Date.now(),
-    videoName: videoFile?.name || "",
-    videoPath: videoFile?.path || "",
-    ...(fileHash ? { fileHash } : {}),
-    sourceLang,
-    targetLang,
-    mode: mediaType,
-    subtitles: status === "completed" ? subtitleItems : [],
-    status,
-    ...(error ? { error } : {}),
-    ...(subtitleFilePath ? { subtitleFilePath } : {}),
-  };
-}
-
-async function saveCompletedHistoryEntry(entry: HistoryEntry, replaceHistoryId?: string) {
-  const historyStore = useHistoryStore.getState();
-  if (replaceHistoryId) {
-    await historyStore.replaceEntry(replaceHistoryId, entry);
-  } else {
-    await historyStore.prepend(entry);
-  }
-}
-
 function failPipelineStep(
   get: () => TranslationState & TranslationActions,
   key: PipelineStepKey,
@@ -94,6 +56,18 @@ function failActivePipelineStep(
   error: string,
 ) {
   failPipelineStep(get, get().activeStepKey ?? fallbackKey, error);
+}
+
+function completeActiveResultStep(get: () => TranslationState & TranslationActions) {
+  const activeStepKey = get().activeStepKey;
+  if (
+    activeStepKey === "local-whisper" ||
+    activeStepKey === "cloud-text-translate" ||
+    activeStepKey === "local-llm-start" ||
+    activeStepKey === "local-llm-translate"
+  ) {
+    get().completePipelineStep(activeStepKey, "字幕生成完成");
+  }
 }
 
 // ── Exported helpers used by store actions ──
@@ -289,6 +263,15 @@ export function startLocalPipeline(
   const get = (): TranslationState & TranslationActions => store.getState();
   pendingCtx = null;
 
+  get().initPipelineSteps({
+    engine: "local",
+    mode,
+    sourceLang,
+    targetLang,
+    translationFallback,
+  });
+  get().activatePipelineStep("analyze-file", "准备本地识别...");
+
   set({
     appStep: "processing",
     pipelinePhase: "extracting",
@@ -303,11 +286,15 @@ export function startLocalPipeline(
   (async () => {
     try {
       if (!modelPath) {
-        set({ error: "请先下载并选择 Whisper 本地模型。", pipelinePhase: null });
+        const message = "请先下载并选择 Whisper 本地模型。";
+        get().failPipelineStep("local-whisper", message);
+        set({ error: message, pipelinePhase: null });
         return;
       }
       if (sourceLang !== targetLang && translationFallback !== "local-only" && !apiKey) {
-        set({ error: "本地跨语言翻译需要 DashScope API Key。", pipelinePhase: null });
+        const message = "本地跨语言翻译需要 DashScope API Key。";
+        get().failPipelineStep("cloud-text-translate", message);
+        set({ error: message, pipelinePhase: null });
         return;
       }
       if (
@@ -315,11 +302,14 @@ export function startLocalPipeline(
         translationFallback === "local-only" &&
         !translateModelPath
       ) {
-        set({ error: "请先下载并选择本地字幕翻译模型。", pipelinePhase: null });
+        const message = "请先下载并选择本地字幕翻译模型。";
+        get().failPipelineStep("local-llm-start", message);
+        set({ error: message, pipelinePhase: null });
         return;
       }
 
       const meta = await probe(filePath);
+      get().completePipelineStep("analyze-file", `时长 ${formatDuration(meta.durationSeconds)}`);
       if (meta.durationSeconds > MAX_DURATION_SECONDS) {
         showMessage({
           type: "error",
@@ -327,14 +317,23 @@ export function startLocalPipeline(
           description: `时长 ${formatDuration(meta.durationSeconds)}，超过 3 小时上限。请分成多段后分别翻译。`,
           duration: 8000,
         });
+        get().failPipelineStep(
+          "analyze-file",
+          `时长 ${formatDuration(meta.durationSeconds)}，超过 3 小时上限。`,
+        );
         set({ appStep: "idle", error: null });
         return;
       }
 
+      get().activatePipelineStep("prepare-local-audio", "准备 16kHz 单声道 WAV");
       const wavPath = await createTempPath("wav");
       trackTemp(ss, wavPath);
-      if (!(await runExtractWav16kMono(filePath, wavPath, set))) return;
+      if (!(await runExtractWav16kMono(filePath, wavPath, set))) {
+        failPipelineStep(get, "prepare-local-audio", get().error || "本地识别音频准备失败");
+        return;
+      }
       if (!isAlive(ss)) return;
+      get().completePipelineStep("prepare-local-audio", "本地识别音频已准备好");
 
       await localRecognizeAndTranslate(
         ss,
@@ -353,7 +352,9 @@ export function startLocalPipeline(
       );
     } catch (err) {
       if (!isAlive(ss)) return;
-      set({ error: err instanceof Error ? err.message : String(err), pipelinePhase: null });
+      const message = err instanceof Error ? err.message : String(err);
+      failActivePipelineStep(get, "analyze-file", message);
+      set({ error: message, pipelinePhase: null });
     }
   })();
 }
@@ -750,7 +751,12 @@ async function localRecognizeAndTranslate(
 
   const up = await listen<TaskEvent<string>>("translate-progress", (e) => {
     if (!isCurrentEvent(e.payload)) return;
-    set({ progress: String(e.payload.payload) });
+    const message = String(e.payload.payload);
+    set({ progress: message });
+    applyPipelineStepActions(
+      get(),
+      mapPipelineProgressMessage(message, { route: get().pipelineRoute }),
+    );
   });
   const uc = await listen<TaskEvent<string>>("translate-chunk", (e) => {
     if (!isCurrentEvent(e.payload)) return;
@@ -766,7 +772,9 @@ async function localRecognizeAndTranslate(
     ue();
     ud();
     ss.unlisten = null;
-    set({ error: String(e.payload.payload), pipelinePhase: null });
+    const message = String(e.payload.payload);
+    failActivePipelineStep(get, "local-whisper", message);
+    set({ error: message, pipelinePhase: null });
   });
   const ud = await listen<TaskEvent<null>>("translate-done", async (e) => {
     if (!isCurrentEvent(e.payload)) return;
@@ -782,18 +790,35 @@ async function localRecognizeAndTranslate(
     }
     ss.tempFiles.length = 0;
 
+    completeActiveResultStep(get);
+    get().activatePipelineStep("parse-subtitles", "解析模型输出");
     const parsed = parseModelOutputWithWarnings(ss.rawText);
     const resolved = parsed.items;
     if (resolved.length === 0) {
+      const message = ss.rawText.trim()
+        ? "本地管线返回内容无法解析为 SRT，请重试或复制实时流内容手动处理。"
+        : "本地管线未返回可用字幕内容。";
+      get().failPipelineStep("parse-subtitles", message);
       set({
-        error: ss.rawText.trim()
-          ? "本地管线返回内容无法解析为 SRT，请重试或复制实时流内容手动处理。"
-          : "本地管线未返回可用字幕内容。",
+        error: message,
         rawPreviewText: ss.rawText,
         pipelinePhase: null,
       });
       return;
     }
+    get().completePipelineStep("parse-subtitles", `解析出 ${resolved.length} 条字幕`);
+    get().activatePipelineStep("save-history", "保存字幕和历史记录");
+
+    await commitCompletedHistoryEntry({
+      videoFile: get().videoFile,
+      subtitleItems: resolved,
+      sourceLang,
+      targetLang,
+      mediaType,
+      fileHash,
+      replaceHistoryId,
+    });
+    get().completePipelineStep("save-history", "结果已保存");
 
     useTranslationStore.setState(() => ({
       subtitleItems: resolved,
@@ -802,34 +827,6 @@ async function localRecognizeAndTranslate(
       pipelinePhase: null,
       appStep: "preview",
     }));
-
-    const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    let subtitleFilePath: string | undefined;
-    try {
-      subtitleFilePath = (await invoke("write_subtitle_file", {
-        id,
-        content: itemsToSrt(resolved),
-      })) as string;
-    } catch (err) {
-      showMessage({
-        type: "warning",
-        title: "字幕缓存保存失败",
-        description: err instanceof Error ? err.message : String(err),
-      });
-    }
-    const entry = makeEntry(
-      get().videoFile,
-      resolved,
-      sourceLang,
-      targetLang,
-      mediaType,
-      "completed",
-      undefined,
-      id,
-      subtitleFilePath,
-      fileHash,
-    );
-    await saveCompletedHistoryEntry(entry, replaceHistoryId);
   });
   ss.unlisten = () => {
     up();
@@ -842,6 +839,10 @@ async function localRecognizeAndTranslate(
     pipelinePhase: "translating",
     progress: sourceLang === targetLang ? "本地语音识别中..." : "本地识别后将进行文本翻译...",
   });
+  get().activatePipelineStep(
+    "local-whisper",
+    sourceLang === targetLang ? "本地语音识别中..." : "本地识别后将进行文本翻译...",
+  );
 
   try {
     await invoke("local_pipeline_translate", {
@@ -865,6 +866,8 @@ async function localRecognizeAndTranslate(
       ss.unlisten = null;
     }
     if (!isAlive(ss)) return;
-    set({ error: err instanceof Error ? err.message : String(err), pipelinePhase: null });
+    const message = err instanceof Error ? err.message : String(err);
+    failActivePipelineStep(get, "local-whisper", message);
+    set({ error: message, pipelinePhase: null });
   }
 }
