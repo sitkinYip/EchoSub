@@ -24,6 +24,9 @@ export default function TranslatePage() {
   const {
     appStep,
     pipelinePhase,
+    pipelineRoute,
+    pipelineSteps,
+    activeStepKey,
     videoFile,
     progress,
     error,
@@ -50,6 +53,9 @@ export default function TranslatePage() {
       <TranslateContent
         appStep={appStep}
         pipelinePhase={pipelinePhase}
+        pipelineRoute={pipelineRoute}
+        pipelineSteps={pipelineSteps}
+        activeStepKey={activeStepKey}
         videoFile={videoFile}
         progress={progress}
         error={error}
