@@ -188,6 +188,18 @@ React UI
 - 追踪 active child process。
 - `killFfmpeg()` 停止当前 FFmpeg。
 - 从 stderr 解析 frame/time/speed，更新进度文本。
+- 播放器遇到 WebView 不支持的编码时，可生成 app cache 下的 MP4 兼容副本。
+
+Sidecar 配置：
+
+- `src-tauri/tauri.conf.json` 的 `bundle.externalBin` 使用不带平台后缀的 `binaries/ffmpeg`。
+- 开发和打包时，实际文件必须放在 `src-tauri/binaries/ffmpeg-{target-triple}`。
+- macOS Apple Silicon：`ffmpeg-aarch64-apple-darwin`。
+- macOS Intel：`ffmpeg-x86_64-apple-darwin`。
+- Windows x64：`ffmpeg-x86_64-pc-windows-msvc.exe`。
+- Linux x64：`ffmpeg-x86_64-unknown-linux-gnu`。
+- macOS 推荐用 Homebrew 安装后复制当前架构的 `ffmpeg`；Windows 推荐使用 FFmpeg 官网下载页链接到的 `gyan.dev` release essentials 包，并复制 `bin/ffmpeg.exe`。
+- 如果平台命名不匹配，前端会在启动 FFmpeg sidecar 时收到 `No such file or directory (os error 2)`。
 
 ### `mediaService`
 

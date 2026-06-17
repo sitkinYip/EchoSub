@@ -198,7 +198,7 @@ Rust 规则：
 - macOS：安装 Xcode Command Line Tools；Metal feature 默认启用。
 - Windows/Linux：先保证 CMake、clang/gcc 可用；当前默认 CPU 构建。
 
-音频输入必须由 FFmpeg 统一转为 16kHz、单声道、32-bit float PCM WAV：
+音频输入必须由 FFmpeg sidecar 统一转为 16kHz、单声道、32-bit float PCM WAV：
 
 ```text
 ffmpeg -i input -ar 16000 -ac 1 -c:a pcm_f32le output.wav
@@ -210,7 +210,89 @@ ffmpeg -i input -ar 16000 -ac 1 -c:a pcm_f32le output.wav
 
 llama.cpp server 生命周期 command 已接入，sidecar 名称为 `binaries/llama-server`。需要本地字幕翻译或 `cloud-then-local` fallback 时，开发机必须准备 `llama-server` 可执行文件；只做云端翻译、Whisper ASR、模型下载管理时不需要。
 
-### 6.2 llama-server sidecar 准备
+### 6.2 FFmpeg sidecar 准备
+
+FFmpeg 是核心开发依赖，不是可选项。音频提取、WAV 转换、媒体探测、视频压缩、播放器兼容副本都通过前端 `Command.sidecar("binaries/ffmpeg", args)` 调用。
+
+Tauri 配置使用未带平台后缀的 sidecar 名称：
+
+```json
+"externalBin": ["binaries/ffmpeg"]
+```
+
+实际文件必须按目标平台命名后放在 `src-tauri/binaries/` 下：
+
+- macOS Apple Silicon：`src-tauri/binaries/ffmpeg-aarch64-apple-darwin`
+- macOS Intel：`src-tauri/binaries/ffmpeg-x86_64-apple-darwin`
+- Windows x64：`src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe`
+- Linux x64：`src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu`
+
+macOS Apple Silicon 获取方式：
+
+1. 推荐使用 Homebrew：`brew install ffmpeg`。Homebrew 会安装当前机器架构可运行的 FFmpeg。
+2. 复制 `$(which ffmpeg)` 为 `src-tauri/binaries/ffmpeg-aarch64-apple-darwin`。
+3. 执行 `chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin`。
+4. 用 sidecar 文件本身验证：`src-tauri/binaries/ffmpeg-aarch64-apple-darwin -version`。
+
+macOS Apple Silicon 示例命令：
+
+```bash
+mkdir -p src-tauri/binaries
+brew install ffmpeg
+cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+src-tauri/binaries/ffmpeg-aarch64-apple-darwin -version
+```
+
+macOS Intel 流程相同，但目标文件名是：
+
+```bash
+cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+src-tauri/binaries/ffmpeg-x86_64-apple-darwin -version
+```
+
+如果从浏览器下载 macOS 二进制而不是 Homebrew，下载后可能带 quarantine 标记。确认来源可信后，可对复制后的 sidecar 执行：
+
+```bash
+xattr -dr com.apple.quarantine src-tauri/binaries/ffmpeg-*-apple-darwin
+```
+
+Windows x64 获取方式：
+
+1. 打开 FFmpeg 官网下载页 `https://ffmpeg.org/download.html`，进入 Windows builds。
+2. 推荐下载 `gyan.dev` 的 release essentials 包：`https://www.gyan.dev/ffmpeg/builds/` 中的 `ffmpeg-release-essentials.zip`。
+3. 解压后复制包内 `bin/ffmpeg.exe` 为 `src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe`。
+4. 在 PowerShell 中验证：
+
+```powershell
+.\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe -version
+```
+
+Windows 示例命令：
+
+```powershell
+New-Item -ItemType Directory -Force .\src-tauri\binaries | Out-Null
+Expand-Archive .\ffmpeg-release-essentials.zip -DestinationPath .\ffmpeg
+Copy-Item .\ffmpeg\ffmpeg-*-essentials_build\bin\ffmpeg.exe .\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe
+.\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe -version
+```
+
+Linux x64 获取方式：
+
+1. 可以使用发行版包管理器安装后复制 `which ffmpeg` 的结果。
+2. 也可以下载静态 build，但必须确认 glibc / 运行库与目标环境兼容。
+3. 目标文件名必须是 `src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu`，并且需要 `chmod +x`。
+
+常见失败：
+
+- `无法启动 FFmpeg: No such file or directory (os error 2)`：`ffmpeg-{target-triple}` 不存在，或文件放在了错误目录。
+- Windows 下只复制成 `ffmpeg.exe`：Tauri 找不到；必须命名为 `ffmpeg-x86_64-pc-windows-msvc.exe`。
+- macOS 下复制后没有执行权限：补 `chmod +x src-tauri/binaries/ffmpeg-*-apple-darwin`。
+- macOS 下浏览器下载的二进制被拦截：确认来源可信后移除 quarantine，或改用 Homebrew 安装后复制。
+- `externalBin` 配置了 `binaries/ffmpeg` 但对应平台文件不存在：`npm run tauri dev` 或构建会失败。
+
+### 6.3 llama-server sidecar 准备
 
 本项目通过 Tauri sidecar 启动 llama.cpp 的 OpenAI-compatible server：
 

@@ -35,7 +35,7 @@ EchoSub 是一个基于 Tauri v2 的桌面端 AI 字幕工具。它在本地用 
 - Node.js 18+
 - Rust stable
 - DashScope API Key
-- FFmpeg sidecar binary
+- FFmpeg sidecar binary（必须按平台后缀命名）
 - llama.cpp `llama-server` sidecar binary（仅本地字幕翻译 / fallback 需要）
 
 ### 安装依赖
@@ -46,19 +46,56 @@ npm install
 
 ### 安装 FFmpeg sidecar
 
-macOS Apple Silicon 示例：
-
-```bash
-brew install ffmpeg
-cp $(which ffmpeg) src-tauri/binaries/ffmpeg-aarch64-apple-darwin
-chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
-```
-
-不同平台需要放置对应命名的 sidecar。Tauri 配置中使用的是：
+EchoSub 通过 Tauri sidecar 调用 FFmpeg。配置里写的是不带平台后缀的名称：
 
 ```json
 "externalBin": ["binaries/ffmpeg"]
 ```
+
+但本地文件必须按当前目标平台放到 `src-tauri/binaries/`：
+
+| 平台 | 文件名 |
+| --- | --- |
+| macOS Apple Silicon | `ffmpeg-aarch64-apple-darwin` |
+| macOS Intel | `ffmpeg-x86_64-apple-darwin` |
+| Windows x64 | `ffmpeg-x86_64-pc-windows-msvc.exe` |
+| Linux x64 | `ffmpeg-x86_64-unknown-linux-gnu` |
+
+macOS Apple Silicon 推荐用 Homebrew 安装当前架构的 FFmpeg：
+
+```bash
+mkdir -p src-tauri/binaries
+brew install ffmpeg
+cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+src-tauri/binaries/ffmpeg-aarch64-apple-darwin -version
+```
+
+macOS Intel 使用同样流程，但目标文件名换成：
+
+```bash
+cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+```
+
+如果从浏览器下载 macOS 二进制而不是 Homebrew，下载后可能带 quarantine 标记；确认来源可信后可对复制后的文件执行：
+
+```bash
+xattr -dr com.apple.quarantine src-tauri/binaries/ffmpeg-*-apple-darwin
+```
+
+Windows x64 推荐使用 FFmpeg 官网下载页链接到的 Windows builds，例如 `gyan.dev` 的 `ffmpeg-release-essentials.zip`：
+
+```powershell
+New-Item -ItemType Directory -Force .\src-tauri\binaries | Out-Null
+
+# 下载并解压 https://www.gyan.dev/ffmpeg/builds/ 的 ffmpeg-release-essentials.zip
+Expand-Archive .\ffmpeg-release-essentials.zip -DestinationPath .\ffmpeg
+Copy-Item .\ffmpeg\ffmpeg-*-essentials_build\bin\ffmpeg.exe .\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe
+.\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe -version
+```
+
+如果 `npm run tauri dev` 报 `No such file or directory (os error 2)`，优先检查文件名是否正好匹配当前平台；Tauri 不会直接查找 `ffmpeg`、`ffmpeg.exe` 或任意下载包里的原始名字。
 
 ### 安装 llama-server sidecar（可选）
 
@@ -173,7 +210,7 @@ src-tauri/
 ├── Cargo.toml
 ├── tauri.conf.json
 ├── capabilities/default.json
-├── binaries/                       # FFmpeg sidecar
+├── binaries/                       # FFmpeg / llama-server sidecar
 └── src/
     ├── lib.rs                      # Tauri app + command 注册
     ├── file_ops.rs                 # 文件、API Key、临时文件、字幕缓存
