@@ -21,6 +21,12 @@ import { useTranslationStore } from "@/stores/translationStore";
 import { useHistoryStore } from "@/stores/historyStore";
 import type { TranslationState, TranslationActions } from "@/stores/translationStore";
 import type { TranslateEngine, TranslationFallback } from "@/config";
+import {
+  applyPipelineStepActions,
+  commitCompletedHistoryEntry,
+  mapPipelineProgressMessage,
+} from "./translationPipeline";
+import type { PipelineStepKey } from "@/pages/TranslatePage/utils/pipelineTypes";
 
 let pendingCtx: PendingCtx | null = null;
 
@@ -71,6 +77,23 @@ async function saveCompletedHistoryEntry(entry: HistoryEntry, replaceHistoryId?:
   } else {
     await historyStore.prepend(entry);
   }
+}
+
+function failPipelineStep(
+  get: () => TranslationState & TranslationActions,
+  key: PipelineStepKey,
+  error: string,
+  detail?: string,
+) {
+  get().failPipelineStep(key, error, detail);
+}
+
+function failActivePipelineStep(
+  get: () => TranslationState & TranslationActions,
+  fallbackKey: PipelineStepKey,
+  error: string,
+) {
+  failPipelineStep(get, get().activeStepKey ?? fallbackKey, error);
 }
 
 // ── Exported helpers used by store actions ──
@@ -124,6 +147,15 @@ export function startPipeline(
   const get = (): TranslationState & TranslationActions => store.getState();
   pendingCtx = null;
 
+  get().initPipelineSteps({
+    engine: "cloud",
+    mode,
+    sourceLang,
+    targetLang,
+    translationFallback,
+  });
+  get().activatePipelineStep("analyze-file", mode === "video" ? "检查文件..." : "分析文件中...");
+
   set({
     appStep: "processing",
     pipelinePhase: "extracting",
@@ -142,6 +174,7 @@ export function startPipeline(
 
       const meta = await probe(filePath);
       const sizeMB = (meta.size / 1024 / 1024).toFixed(1);
+      get().completePipelineStep("analyze-file", `时长 ${formatDuration(meta.durationSeconds)}`);
 
       if (meta.durationSeconds > MAX_DURATION_SECONDS) {
         showMessage({
@@ -150,11 +183,16 @@ export function startPipeline(
           description: `时长 ${formatDuration(meta.durationSeconds)}，超过模型 3 小时上限。请分成多段后分别翻译。`,
           duration: 8000,
         });
+        get().failPipelineStep(
+          "analyze-file",
+          `时长 ${formatDuration(meta.durationSeconds)}，超过模型 3 小时上限。`,
+        );
         set({ appStep: "idle", error: null });
         return;
       }
 
       if (mode === "video") {
+        get().activatePipelineStep("process-media", "检查视频大小");
         if (meta.size > MAX_DIRECT_UPLOAD_BYTES) {
           pendingCtx = {
             sessionId: ss.id,
@@ -168,6 +206,7 @@ export function startPipeline(
             resolution: meta,
           };
           set({ progress: `${picks(meta.height).pass1Label} — 等待确认` });
+          get().waitPipelineStep("process-media", `${picks(meta.height).pass1Label}，等待确认`);
           showModal("LargeVideo", {
             videoName: fileName,
             sizeMB,
@@ -185,20 +224,27 @@ export function startPipeline(
           return;
         }
         set({ progress: `视频大小符合要求 (${sizeMB} MB)，直接上传` });
+        get().completePipelineStep("process-media", `视频大小符合要求 (${sizeMB} MB)`);
       } else {
+        get().activatePipelineStep("prepare-audio", "检查音频输入");
         const ext = filePath.split(".").pop()?.toLowerCase() || "";
         if (SUPPORTED_AUDIO_EXTS.includes(ext)) {
           set({ progress: `音频文件 (${sizeMB} MB)，直接上传` });
+          get().skipPipelineStep("prepare-audio", `音频文件可直接上传 (${sizeMB} MB)`);
           mediaFile = filePath;
           mediaType = "audio";
         } else {
           set({ progress: "正在提取音频..." });
           const ap = await createTempPath("mp3");
           trackTemp(ss, ap);
-          if (!(await runExtractAudio(filePath, ap, set))) return;
+          if (!(await runExtractAudio(filePath, ap, set))) {
+            failActivePipelineStep(get, "prepare-audio", get().error || "音频提取失败");
+            return;
+          }
           mediaFile = ap;
           mediaType = "audio";
           set({ progress: "音频提取完成" });
+          get().completePipelineStep("prepare-audio", "音频提取完成");
         }
       }
 
@@ -217,6 +263,7 @@ export function startPipeline(
       );
     } catch (err) {
       if (!isAlive(ss)) return;
+      failActivePipelineStep(get, "analyze-file", err instanceof Error ? err.message : String(err));
       set({ error: err instanceof Error ? err.message : String(err), pipelinePhase: null });
     }
   })();
@@ -323,6 +370,7 @@ async function runCompress(ctx: PendingCtx) {
   const set = safeSet(ss, _set);
   const get = (): TranslationState & TranslationActions => store.getState();
 
+  get().activatePipelineStep("process-media", "开始压缩视频");
   set({
     appStep: "processing",
     pipelinePhase: "extracting",
@@ -365,14 +413,17 @@ async function runCompress(ctx: PendingCtx) {
       pass1Label,
       set,
     ))
-  )
+  ) {
+    failPipelineStep(get, "process-media", get().error || "视频压缩失败");
     return;
+  }
 
   const s1 = (await invoke("get_file_info", { path: vp1 }).catch(() => ({ size: 0 }))) as {
     size: number;
   };
   if (s1.size <= MAX_DIRECT_UPLOAD_BYTES) {
     set({ progress: `压缩完成 (${(s1.size / 1048576).toFixed(1)} MB)` });
+    get().completePipelineStep("process-media", `压缩完成 (${(s1.size / 1048576).toFixed(1)} MB)`);
     if (!isAlive(ss)) return;
     await uploadAndTranslate(
       ss,
@@ -421,14 +472,20 @@ async function runCompress(ctx: PendingCtx) {
       "极限压缩 240p 中...",
       set,
     ))
-  )
+  ) {
+    failPipelineStep(get, "process-media", get().error || "视频压缩失败");
     return;
+  }
 
   const s2 = (await invoke("get_file_info", { path: vp2 }).catch(() => ({ size: 0 }))) as {
     size: number;
   };
   if (s2.size <= MAX_DIRECT_UPLOAD_BYTES) {
     set({ progress: `240p 压缩完成 (${(s2.size / 1048576).toFixed(1)} MB)` });
+    get().completePipelineStep(
+      "process-media",
+      `240p 压缩完成 (${(s2.size / 1048576).toFixed(1)} MB)`,
+    );
     if (!isAlive(ss)) return;
     await uploadAndTranslate(
       ss,
@@ -449,8 +506,12 @@ async function runCompress(ctx: PendingCtx) {
   if (!isAlive(ss)) return;
   const ap = await createTempPath("mp3");
   trackTemp(ss, ap);
-  if (!(await runExtractAudio(filePath, ap, set))) return;
+  if (!(await runExtractAudio(filePath, ap, set))) {
+    failPipelineStep(get, "process-media", get().error || "音频提取失败");
+    return;
+  }
   if (!isAlive(ss)) return;
+  get().completePipelineStep("process-media", "已转为音频上传");
   await uploadAndTranslate(
     ss,
     ap,
@@ -475,6 +536,7 @@ async function runAudio(ctx: PendingCtx) {
   const set = safeSet(ss, _set);
   const get = (): TranslationState & TranslationActions => store.getState();
 
+  get().activatePipelineStep("process-media", "切换为音频提取");
   set({
     appStep: "processing",
     pipelinePhase: "extracting",
@@ -487,9 +549,13 @@ async function runAudio(ctx: PendingCtx) {
 
   const ap = await createTempPath("mp3");
   trackTemp(ss, ap);
-  if (!(await runExtractAudio(filePath, ap, set))) return;
+  if (!(await runExtractAudio(filePath, ap, set))) {
+    failPipelineStep(get, "process-media", get().error || "音频提取失败");
+    return;
+  }
   if (!isAlive(ss)) return;
   set({ progress: "音频提取完成" });
+  get().completePipelineStep("process-media", "音频提取完成");
   await uploadAndTranslate(
     ss,
     ap,
@@ -523,6 +589,7 @@ async function uploadAndTranslate(
   }))) as { size: number };
   const uploadMB = (uploadSize.size / 1024 / 1024).toFixed(1);
   set({ pipelinePhase: "uploading", progress: `准备上传 (${uploadMB} MB)...` });
+  get().activatePipelineStep("upload-media", `准备上传 (${uploadMB} MB)`);
 
   if (ss.unlisten) {
     ss.unlisten();
@@ -533,7 +600,12 @@ async function uploadAndTranslate(
 
   const up = await listen<TaskEvent<string>>("translate-progress", (e) => {
     if (!isCurrentEvent(e.payload)) return;
-    set({ progress: String(e.payload.payload) });
+    const message = String(e.payload.payload);
+    set({ progress: message });
+    applyPipelineStepActions(
+      get(),
+      mapPipelineProgressMessage(message, { route: get().pipelineRoute }),
+    );
   });
   const uc = await listen<TaskEvent<string>>("translate-chunk", (e) => {
     if (!isCurrentEvent(e.payload)) return;
@@ -549,7 +621,9 @@ async function uploadAndTranslate(
     ue();
     ud();
     ss.unlisten = null;
-    set({ error: String(e.payload.payload), pipelinePhase: null });
+    const message = String(e.payload.payload);
+    failPipelineStep(get, "cloud-media-translate", message);
+    set({ error: message, pipelinePhase: null });
   });
   const ud = await listen<TaskEvent<null>>("translate-done", async (e) => {
     if (!isCurrentEvent(e.payload)) return;
@@ -559,20 +633,36 @@ async function uploadAndTranslate(
     ud();
     ss.unlisten = null;
     if (!isAlive(ss)) return;
+    get().completePipelineStep("cloud-media-translate", "云端识别与翻译完成");
+    get().activatePipelineStep("parse-subtitles", "解析模型输出");
     const parsed = parseModelOutputWithWarnings(ss.rawText);
     const resolved = parsed.items;
     if (resolved.length === 0) {
+      const message = ss.rawText.trim()
+        ? "模型返回内容无法解析为 SRT，请重试或复制实时流内容手动处理。"
+        : "模型未返回可用字幕内容。";
+      get().failPipelineStep("parse-subtitles", message);
       set({
-        error: ss.rawText.trim()
-          ? "模型返回内容无法解析为 SRT，请重试或复制实时流内容手动处理。"
-          : "模型未返回可用字幕内容。",
+        error: message,
         rawPreviewText: ss.rawText,
         pipelinePhase: null,
       });
       return;
     }
+    get().completePipelineStep("parse-subtitles", `解析出 ${resolved.length} 条字幕`);
+    get().activatePipelineStep("save-history", "保存字幕和历史记录");
 
-    // Atomic: push to history using a function updater, save atomically
+    await commitCompletedHistoryEntry({
+      videoFile: get().videoFile,
+      subtitleItems: resolved,
+      sourceLang,
+      targetLang,
+      mediaType,
+      fileHash,
+      replaceHistoryId,
+    });
+    get().completePipelineStep("save-history", "结果已保存");
+
     useTranslationStore.setState(() => ({
       subtitleItems: resolved,
       subtitleCount: resolved.length,
@@ -580,34 +670,6 @@ async function uploadAndTranslate(
       pipelinePhase: null,
       appStep: "preview",
     }));
-
-    const id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    let subtitleFilePath: string | undefined;
-    try {
-      subtitleFilePath = (await invoke("write_subtitle_file", {
-        id,
-        content: itemsToSrt(resolved),
-      })) as string;
-    } catch (err) {
-      showMessage({
-        type: "warning",
-        title: "字幕缓存保存失败",
-        description: err instanceof Error ? err.message : String(err),
-      });
-    }
-    const entry = makeEntry(
-      get().videoFile,
-      resolved,
-      sourceLang,
-      targetLang,
-      mediaType,
-      "completed",
-      undefined,
-      id,
-      subtitleFilePath,
-      fileHash,
-    );
-    await saveCompletedHistoryEntry(entry, replaceHistoryId);
   });
   ss.unlisten = () => {
     up();
@@ -628,7 +690,9 @@ async function uploadAndTranslate(
       ss.unlisten();
       ss.unlisten = null;
     }
-    set({ error: err instanceof Error ? err.message : String(err), pipelinePhase: null });
+    const message = err instanceof Error ? err.message : String(err);
+    failPipelineStep(get, "upload-media", message);
+    set({ error: message, pipelinePhase: null });
     return;
   }
 
@@ -639,6 +703,8 @@ async function uploadAndTranslate(
   ss.tempFiles.length = 0;
 
   set({ pipelinePhase: "translating", progress: "AI 正在识别并翻译..." });
+  get().completePipelineStep("upload-media", "媒体上传完成");
+  get().activatePipelineStep("cloud-media-translate", "AI 正在识别并翻译...");
 
   try {
     await invoke("stream_translate", {
@@ -653,7 +719,9 @@ async function uploadAndTranslate(
       ss.unlisten = null;
     }
     if (!isAlive(ss)) return;
-    set({ error: err instanceof Error ? err.message : String(err), pipelinePhase: null });
+    const message = err instanceof Error ? err.message : String(err);
+    failPipelineStep(get, "cloud-media-translate", message);
+    set({ error: message, pipelinePhase: null });
   }
 }
 
