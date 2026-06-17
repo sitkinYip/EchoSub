@@ -55,6 +55,16 @@ fn api_key_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+pub fn cleanup_media_temp_dir(app: &AppHandle) {
+    let Ok(dir) = app.path().app_cache_dir() else {
+        return;
+    };
+    let dir = dir.join("media-temp");
+    if dir.exists() {
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
 // ── File-based API key storage with OS-level permissions ──
 // The key is stored at <app_data>/conf/api_key with 0o600 permissions
 // (only the current user can read/write). Not in version control, not

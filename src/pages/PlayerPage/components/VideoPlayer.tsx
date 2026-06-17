@@ -8,12 +8,23 @@ import type { HistoryEntry } from "@/types";
 
 interface Props {
   entry: HistoryEntry;
+  sourcePath?: string;
+  compatCopyPath?: string;
   vttBlobUrl: string;
   onError: (msg: string) => void;
   onClearError: () => void;
+  onDeleteCompatCopy?: () => void;
 }
 
-export default function VideoPlayer({ entry, vttBlobUrl, onError, onClearError }: Props) {
+export default function VideoPlayer({
+  entry,
+  sourcePath,
+  compatCopyPath,
+  vttBlobUrl,
+  onError,
+  onClearError,
+  onDeleteCompatCopy,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
   const [assetUrl, setAssetUrl] = useState("");
@@ -24,8 +35,8 @@ export default function VideoPlayer({ entry, vttBlobUrl, onError, onClearError }
   const targetLang = entry.targetLang;
 
   useEffect(() => {
-    setAssetUrl(convertFileSrc(entry.videoPath));
-  }, [entry.videoPath]);
+    setAssetUrl(convertFileSrc(sourcePath || entry.videoPath));
+  }, [entry.videoPath, sourcePath]);
 
   useEffect(() => {
     if (!containerRef.current || !assetUrl) return;
@@ -140,6 +151,15 @@ export default function VideoPlayer({ entry, vttBlobUrl, onError, onClearError }
         <span className="text-[10px] text-app-text-tertiary">
           {entry.mode === "video" ? "视频模式" : "音频模式"}
         </span>
+        {compatCopyPath && onDeleteCompatCopy && (
+          <button
+            type="button"
+            onClick={onDeleteCompatCopy}
+            className="text-[10px] text-app-text-tertiary hover:text-app-error transition-colors"
+          >
+            删除兼容副本
+          </button>
+        )}
       </div>
     </div>
   );

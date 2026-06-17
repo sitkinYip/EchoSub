@@ -32,6 +32,10 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_http::init())
         .manage(local_llm::LocalLlmState::default())
+        .setup(|app| {
+            file_ops::cleanup_media_temp_dir(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             file_ops::get_file_info,
             file_ops::calculate_file_hash,
