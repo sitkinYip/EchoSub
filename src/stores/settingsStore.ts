@@ -4,6 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Language } from "@/types";
 import type { Theme } from "@/config/theme";
 import type { TranslateEngine, TranslationFallback } from "@/config";
+import { checkTranslateModelExists, checkWhisperModelExists } from "@/services/whisperService";
+
+export type LocalModelValidationResult = {
+  whisperCleared: boolean;
+  translateCleared: boolean;
+};
 
 interface SettingsState {
   apiKey: string;
@@ -21,6 +27,7 @@ interface SettingsState {
   loaded: boolean;
 
   load: () => Promise<void>;
+  validateLocalModels: () => Promise<LocalModelValidationResult>;
   update: (
     partial: Partial<
       Pick<
@@ -41,7 +48,7 @@ interface SettingsState {
   ) => Promise<void>;
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+export const useSettingsStore = create<SettingsState>((set, get) => ({
   apiKey: "",
   hasApiKey: false,
   sourceLang: "日语",
@@ -107,10 +114,55 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         theme: theme || "dark",
         loaded: true,
       });
+      await get().validateLocalModels();
     } catch (err) {
       console.warn("无法加载配置:", err);
       set({ loaded: true });
     }
+  },
+
+  validateLocalModels: async () => {
+    const state = get();
+    const partial: Partial<
+      Pick<
+        SettingsState,
+        "whisperModelId" | "whisperModelPath" | "translateModelId" | "translateModelPath"
+      >
+    > = {};
+    let whisperCleared = false;
+    let translateCleared = false;
+
+    if (state.whisperModelPath) {
+      try {
+        const exists = await checkWhisperModelExists(state.whisperModelId);
+        if (!exists) {
+          partial.whisperModelId = "";
+          partial.whisperModelPath = "";
+          whisperCleared = true;
+        }
+      } catch (err) {
+        console.warn("无法校验 Whisper 模型:", err);
+      }
+    }
+
+    if (state.translateModelPath) {
+      try {
+        const exists = await checkTranslateModelExists(state.translateModelId);
+        if (!exists) {
+          partial.translateModelId = "";
+          partial.translateModelPath = "";
+          translateCleared = true;
+        }
+      } catch (err) {
+        console.warn("无法校验翻译模型:", err);
+      }
+    }
+
+    if (Object.keys(partial).length > 0) {
+      await get().update(partial);
+    }
+
+    return { whisperCleared, translateCleared };
   },
 
   update: async (partial) => {

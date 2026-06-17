@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Icon from "@/components/Icon";
 import { showMessage } from "@/components/Toast/create";
+import { useSettingsStore } from "@/stores/settingsStore";
 import type { ModalContentProps } from "@/config/modals";
 import {
   deleteTranslateModel,
@@ -55,6 +56,7 @@ export default function ModelManagerModal({ close, data }: ModalContentProps<Mod
     id: data?.selectedTranslateId || "",
     path: data?.selectedTranslatePath || "",
   });
+  const validateLocalModels = useSettingsStore((s) => s.validateLocalModels);
 
   const localById = useMemo(() => {
     const map = new Map<string, LocalWhisperModel>();
@@ -205,7 +207,12 @@ export default function ModelManagerModal({ close, data }: ModalContentProps<Mod
     try {
       await deleteWhisperModel(model.path);
       await refresh();
-      if (selectedWhisper.path === model.path || selectedWhisper.id === model.id) {
+      const validation = await validateLocalModels();
+      if (
+        selectedWhisper.path === model.path ||
+        selectedWhisper.id === model.id ||
+        validation.whisperCleared
+      ) {
         setSelectedWhisper({ id: "", path: "" });
       }
       showMessage({ type: "success", title: "模型已删除", description: model.label });
@@ -228,7 +235,12 @@ export default function ModelManagerModal({ close, data }: ModalContentProps<Mod
     try {
       await deleteTranslateModel(model.path);
       await refresh();
-      if (selectedTranslate.path === model.path || selectedTranslate.id === model.id) {
+      const validation = await validateLocalModels();
+      if (
+        selectedTranslate.path === model.path ||
+        selectedTranslate.id === model.id ||
+        validation.translateCleared
+      ) {
         setSelectedTranslate({ id: "", path: "" });
       }
       showMessage({ type: "success", title: "翻译模型已删除", description: model.label });

@@ -88,6 +88,14 @@ src-tauri/
 
 页面不要直接实现长任务细节。涉及 FFmpeg、上传、翻译、历史落盘的逻辑放到 `services/` 和 `stores/`。
 
+页面内文件拆分规则：
+
+- 页面入口保留 `index.tsx`，只做页面级组合和少量状态解构。
+- 页面专属展示组件放在该页面的 `components/` 目录，例如 `PlayerPage/components/VideoPlayer.tsx`。
+- 页面专属 hook 放在该页面的 `hooks/` 目录，例如 `TranslatePage/hooks/useTranslatePageController.ts`。
+- 页面专属小工具、局部类型放在该页面的 `utils/` 目录；跨页面复用后再提升到 `src/utils` 或 `src/types`。
+- 不要把多个拆分文件平铺在页面根目录；根目录应优先保持可扫读。
+
 ### 4.2 Stores
 
 | Store | 职责 |

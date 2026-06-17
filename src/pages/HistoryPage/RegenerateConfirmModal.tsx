@@ -34,14 +34,16 @@ export default function RegenerateConfirmModal({ close, data }: ModalContentProp
       <div className="space-y-5">
         {/* Video name */}
         <div className="px-3 py-2.5 bg-app-surface-alt rounded-xl ring-1 ring-app-border-light">
-          <p className="text-sm text-app-text truncate font-medium">{data.videoName}</p>
+          <p className="text-sm text-app-text truncate font-medium" title={data.videoName}>
+            {data.videoName}
+          </p>
         </div>
 
         {/* File existence check */}
         {!data.exists ? (
           <div className="p-3 rounded-xl bg-app-error-bg ring-1 ring-app-error-ring flex items-start gap-3">
             <Icon name="close" className="w-4 h-4 text-app-error flex-shrink-0 mt-0.5" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm text-app-error font-medium">文件已丢失</p>
               <p className="text-xs text-app-text-tertiary mt-0.5">
                 原视频文件已不存在或被移动，无法重新生成。
@@ -51,9 +53,11 @@ export default function RegenerateConfirmModal({ close, data }: ModalContentProp
         ) : (
           <div className="p-3 rounded-xl bg-app-success-bg ring-1 ring-app-success-ring flex items-start gap-3">
             <Icon name="check" className="w-4 h-4 text-app-success flex-shrink-0 mt-0.5" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm text-app-success font-medium">文件就绪</p>
-              <p className="text-xs text-app-text-tertiary mt-0.5 truncate">{data.videoPath}</p>
+              <p className="text-xs text-app-text-tertiary mt-0.5 truncate" title={data.videoPath}>
+                {data.videoPath}
+              </p>
             </div>
           </div>
         )}

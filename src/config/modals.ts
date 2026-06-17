@@ -68,7 +68,7 @@ export const MODAL_REGISTRY: Record<
       }>,
   },
   [ModalName.RegenerateConfirm]: {
-    defaults: { maskClosable: true, showClose: true, width: "sm" },
+    defaults: { maskClosable: true, showClose: true, width: "md" },
     loader: () =>
       import("../pages/HistoryPage/RegenerateConfirmModal.tsx") as Promise<{
         default: ErasedModalComponent;
@@ -77,14 +77,14 @@ export const MODAL_REGISTRY: Record<
   [ModalName.DuplicateTranslation]: {
     defaults: { maskClosable: true, showClose: true, width: "sm" },
     loader: () =>
-      import("../pages/TranslatePage/DuplicateTranslationModal.tsx") as Promise<{
+      import("../pages/TranslatePage/components/DuplicateTranslationModal.tsx") as Promise<{
         default: ErasedModalComponent;
       }>,
   },
   [ModalName.LargeVideo]: {
     defaults: { maskClosable: false, showClose: false, width: "sm" },
     loader: () =>
-      import("../pages/TranslatePage/LargeVideoModal.tsx") as Promise<{
+      import("../pages/TranslatePage/components/LargeVideoModal.tsx") as Promise<{
         default: ErasedModalComponent;
       }>,
   },

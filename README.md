@@ -154,6 +154,9 @@ src/
 ├── layouts/RootLayout.tsx          # 侧边栏布局
 ├── pages/
 │   ├── TranslatePage/              # 主翻译链路
+│   │   ├── components/             # 页面专属展示组件和弹窗
+│   │   ├── hooks/                  # 页面交互编排 hook
+│   │   └── utils/                  # 页面局部类型和小工具
 │   ├── HistoryPage/                # 历史、编辑、重新生成
 │   └── PlayerPage/                 # 视频播放器和字幕回看
 ├── services/
