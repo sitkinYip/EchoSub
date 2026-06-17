@@ -24,6 +24,10 @@ type PendingFile = {
   replaceHistoryId?: string;
 };
 
+function nextFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 export default function TranslatePage() {
   const navigate = useNavigate();
   const s = useSettingsStore();
@@ -131,8 +135,21 @@ export default function TranslatePage() {
     t.clearRegenerate();
     t.reset();
     (async () => {
+      useTranslationStore.setState({
+        appStep: "processing",
+        pipelinePhase: "extracting",
+        videoFile: { name: regen.videoName, path: regen.videoPath },
+        progress: "正在检测文件...",
+        error: null,
+        subtitleCount: 0,
+        rawPreviewText: "",
+        subtitleItems: [],
+      });
+      await nextFrame();
+
       let fileHash = regen.fileHash;
       if (!fileHash) {
+        useTranslationStore.setState({ progress: "正在生成文件指纹..." });
         fileHash = (await invoke("calculate_file_hash", { path: regen.videoPath })) as string;
       }
       const mode = regen.uploadVideo ? "video" : "audio";
@@ -144,6 +161,7 @@ export default function TranslatePage() {
         regen.replaceHistoryId,
       );
       if (duplicate) {
+        useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
         showModal("DuplicateTranslation", {
           entry: duplicate,
           onViewHistory: () => navigate("/history"),
@@ -160,6 +178,7 @@ export default function TranslatePage() {
       }
       doStart(regen.videoPath, regen.videoName, mode, fileHash, regen.replaceHistoryId);
     })().catch((err) => {
+      useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
       showMessage({
         type: "error",
         title: "文件校验失败",
@@ -183,10 +202,24 @@ export default function TranslatePage() {
       // Audio-only files always go audio mode
       const isAudio = SUPPORTED_AUDIO_EXTS.includes(ext);
       const effectiveMode = isAudio ? "audio" : uploadVideo ? "video" : "audio";
+      useTranslationStore.setState({
+        appStep: "processing",
+        pipelinePhase: "extracting",
+        videoFile: { name: fn, path: fp },
+        progress: "正在检测文件...",
+        error: null,
+        subtitleCount: 0,
+        rawPreviewText: "",
+        subtitleItems: [],
+      });
+      await nextFrame();
+
       let fileHash: string;
       try {
+        useTranslationStore.setState({ progress: "正在生成文件指纹..." });
         fileHash = (await invoke("calculate_file_hash", { path: fp })) as string;
       } catch (err) {
+        useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
         showMessage({
           type: "error",
           title: "文件校验失败",
@@ -197,6 +230,7 @@ export default function TranslatePage() {
 
       const duplicate = await findDuplicateEntry(fileHash, effectiveMode, sourceLang, targetLang);
       if (duplicate) {
+        useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
         showModal("DuplicateTranslation", {
           entry: duplicate,
           onViewHistory: () => navigate("/history"),
@@ -208,6 +242,7 @@ export default function TranslatePage() {
       const needsApiKey =
         engine === "cloud" || (sourceLang !== targetLang && translationFallback !== "local-only");
       if (engine === "local" && !whisperModelPath) {
+        useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
         showModal("ModelManager", {
           initialTab: "whisper",
           selectedId: whisperModelId,
@@ -230,6 +265,7 @@ export default function TranslatePage() {
         translationFallback === "local-only" &&
         !translateModelPath
       ) {
+        useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
         showModal("ModelManager", {
           initialTab: "translate",
           selectedId: whisperModelId,
@@ -247,6 +283,7 @@ export default function TranslatePage() {
         return;
       }
       if (needsApiKey && !apiKey) {
+        useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
         pendingRef.current = { name: fn, path: fp, hash: fileHash };
         showModal("ApiKey", {
           onCancel: () => {

@@ -1,10 +1,13 @@
 use crate::state::AppState;
 use crate::types::FileInfo;
-use std::fs;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager, State};
 use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+use tauri::{AppHandle, Manager, State};
+
+const FINGERPRINT_SAMPLE_SIZE: u64 = 1024 * 1024;
 
 fn sanitize_id(id: &str) -> Result<(), String> {
     if id.is_empty()
@@ -97,23 +100,58 @@ pub fn get_file_info(path: String) -> Result<FileInfo, String> {
 }
 
 #[tauri::command]
-pub fn calculate_file_hash(path: String) -> Result<String, String> {
-    let normalized = normalize_path(&path)?;
-    let mut file = fs::File::open(&normalized).map_err(|e| format!("无法打开文件计算哈希: {e}"))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|e| format!("读取文件计算哈希失败: {e}"))?;
-        if read == 0 {
-            break;
+pub async fn calculate_file_hash(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let normalized = normalize_path(&path)?;
+        let metadata = fs::metadata(&normalized).map_err(|e| format!("读取文件信息失败: {e}"))?;
+        if !metadata.is_file() {
+            return Err("只能为普通文件生成指纹".to_string());
         }
-        hasher.update(&buffer[..read]);
-    }
 
-    Ok(hex::encode(hasher.finalize()))
+        let mut file =
+            fs::File::open(&normalized).map_err(|e| format!("无法打开文件生成指纹: {e}"))?;
+        let mut hasher = Sha256::new();
+        let file_len = metadata.len();
+        hasher.update(b"echosub-fast-fingerprint-v1");
+        hasher.update(file_len.to_le_bytes());
+        if let Some(file_name) = normalized.file_name().and_then(|name| name.to_str()) {
+            hasher.update(file_name.as_bytes());
+        }
+        if let Ok(modified) = metadata.modified() {
+            if let Ok(duration) = modified.duration_since(UNIX_EPOCH) {
+                hasher.update(duration.as_secs().to_le_bytes());
+                hasher.update(duration.subsec_nanos().to_le_bytes());
+            }
+        }
+
+        let mut offsets = vec![0];
+        if file_len > FINGERPRINT_SAMPLE_SIZE {
+            offsets.push((file_len / 2).saturating_sub(FINGERPRINT_SAMPLE_SIZE / 2));
+            offsets.push(file_len.saturating_sub(FINGERPRINT_SAMPLE_SIZE));
+        }
+        offsets.sort_unstable();
+        offsets.dedup();
+
+        let mut buffer = vec![0_u8; FINGERPRINT_SAMPLE_SIZE as usize];
+        for offset in offsets {
+            if offset >= file_len {
+                continue;
+            }
+            file.seek(SeekFrom::Start(offset))
+                .map_err(|e| format!("读取文件指纹失败: {e}"))?;
+            let target_len = FINGERPRINT_SAMPLE_SIZE.min(file_len - offset) as usize;
+            let read = file
+                .read(&mut buffer[..target_len])
+                .map_err(|e| format!("读取文件指纹失败: {e}"))?;
+            hasher.update(offset.to_le_bytes());
+            hasher.update((read as u64).to_le_bytes());
+            hasher.update(&buffer[..read]);
+        }
+
+        Ok(hex::encode(hasher.finalize()))
+    })
+    .await
+    .map_err(|e| format!("文件指纹任务失败: {e}"))?
 }
 
 #[tauri::command]

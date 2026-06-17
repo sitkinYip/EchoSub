@@ -115,11 +115,11 @@ export default function VideoSidebar({
           completed.length === 0 ? (
             <Empty icon="history" text="暂无已翻译的视频" sub="完成翻译后自动出现在这里" />
           ) : (
-            completed.map((entry) => (
+            completed.map((entry, index) => (
               <ListItem
-                key={entry.id}
+                key={`${entry.id}-${entry.createdAt}-${index}`}
                 entry={entry}
-                active={activeEntry?.id === entry.id}
+                active={activeEntry === entry}
                 onClick={() => onSelect(entry)}
               />
             ))
