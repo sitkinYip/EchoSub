@@ -29,12 +29,17 @@ futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["codec"] }
 whisper-rs = "0.16"
 hound = "3"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs", "util"] }
 
 # Platform-specific acceleration features for whisper.cpp.
 # macOS → Metal (Apple Silicon GPU); other platforms build CPU-only by default
 # (CUDA/OpenBLAS can be enabled per-target later if needed).
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16", features = ["metal"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 strip = true
