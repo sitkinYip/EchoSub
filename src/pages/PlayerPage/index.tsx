@@ -147,7 +147,6 @@ export default function PlayerPage() {
         try {
           const meta = await probe(activeEntry.videoPath);
           strategy = chooseStrategy(meta);
-          hlsStrategyRef.current = strategy;
           setSourceDuration(meta.durationSeconds);
         } catch (probeErr) {
           console.warn("[player] probe 失败，回退 transcode:", probeErr);
@@ -156,7 +155,13 @@ export default function PlayerPage() {
         const session = await startHlsSession({
           inputPath: activeEntry.videoPath,
           strategy,
+          // 默认优先硬件编码；startHlsSession 内部健康检查失败会自动回退软编
         });
+        // 记录实际采用的策略 + 硬件可用性，seek 重启时复用（避免每次 seek 重试硬件）
+        hlsStrategyRef.current = {
+          strategy: session.strategy,
+          preferHardware: session.preferHardware,
+        };
         hlsSessionRef.current = session;
         setStartTime(session.startTime);
         setHlsUrl(session.playlistUrl);
@@ -171,8 +176,11 @@ export default function PlayerPage() {
     [activeEntry, stopActiveHlsSession],
   );
 
-  // 记住当前视频的 HLS 策略（同文件 codec 不变，seek 重启时复用，避免重复 probe）
-  const hlsStrategyRef = useRef<"remux" | "transcode">("transcode");
+  // 记住当前视频的 HLS 策略 + 硬件可用性（同文件 codec 不变，seek 重启时复用）
+  const hlsStrategyRef = useRef<{ strategy: "remux" | "transcode"; preferHardware: boolean }>({
+    strategy: "transcode",
+    preferHardware: true,
+  });
 
   /**
    * seek 到未转码区时重启 session（阶段 5）。
@@ -201,7 +209,9 @@ export default function PlayerPage() {
           }
           const session = await startHlsSession({
             inputPath: activeEntry.videoPath,
-            strategy: hlsStrategyRef.current,
+            strategy: hlsStrategyRef.current.strategy,
+            // 复用首次的硬件可用性判定：若首次回退了软编，seek 也直接软编（省 2s 健康检查）
+            preferHardware: hlsStrategyRef.current.preferHardware,
             startTime: target,
           });
           hlsSessionRef.current = session;

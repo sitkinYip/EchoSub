@@ -144,11 +144,55 @@ pub struct MediaServerOrigin {
     pub origin: String,
 }
 
+/// 把视频编码器参数追加到 args。按平台 + prefer_hardware 选择：
+/// - macOS + prefer_hardware：h264_videotoolbox（硬件加速，CPU 占用低）
+/// - 其他平台或软编：libx264 -preset veryfast（稳定、可控质量）
+///
+/// 资源争用说明：同时运行本地 Whisper（whisper-rs）与 libx264 软件转码会争抢 CPU。
+/// 软编已用 -threads 2 限制；暂不做自动调度（如检测到本地模型运行就暂停转码），
+/// 待有性能数据后再优化。
+fn push_video_encoder_args(args: &mut Vec<String>, prefer_hardware: bool) {
+    if prefer_hardware {
+        // macOS：VideoToolbox。不支持 CRF，用码率；-allow_sw 1 允许硬件失败时软回退
+        // （软回退可能比 libx264 慢，由前端 playlist 健康检查进一步判定是否重启 libx264）。
+        #[cfg(target_os = "macos")]
+        {
+            args.extend([
+                "-c:v".to_string(),
+                "h264_videotoolbox".to_string(),
+                "-b:v".to_string(),
+                "4M".to_string(),
+                "-allow_sw".to_string(),
+                "1".to_string(),
+                "-pix_fmt".to_string(),
+                "yuv420p".to_string(),
+            ]);
+            return;
+        }
+        // 其他平台暂无可靠硬件编码器分支（待有测试环境再接 Windows/Linux），走软编
+    }
+
+    // 软件编码：libx264。-threads 2 限制 CPU，避免与本地 Whisper 竞争。
+    args.extend([
+        "-c:v".to_string(),
+        "libx264".to_string(),
+        "-preset".to_string(),
+        "veryfast".to_string(),
+        "-crf".to_string(),
+        "23".to_string(),
+        "-pix_fmt".to_string(),
+        "yuv420p".to_string(),
+        "-threads".to_string(),
+        "2".to_string(),
+    ]);
+}
+
 fn build_args(
     input_path: &str,
     dir: &Path,
     strategy: &str,
     start_time: Option<f64>,
+    prefer_hardware: bool,
 ) -> Result<Vec<String>, String> {
     let dir_str = dir.to_string_lossy();
     let segment_filename = format!("{dir_str}/seg-%05d.m4s");
@@ -171,25 +215,17 @@ fn build_args(
 
     match strategy {
         "remux" => {
-            // 容器重封，不重编码。阶段 4 才接入判定，这里预留。
+            // 容器重封，不重编码。阶段 4 判定 h264 8bit 才走 remux。
             args.extend(["-c".to_string(), "copy".to_string()]);
         }
         "transcode" => {
+            push_video_encoder_args(&mut args, prefer_hardware);
+            // 音频统一转 AAC（HLS fMP4 兼容性最好）
             args.extend([
-                "-c:v".to_string(),
-                "libx264".to_string(),
-                "-preset".to_string(),
-                "veryfast".to_string(),
-                "-crf".to_string(),
-                "23".to_string(),
-                "-pix_fmt".to_string(),
-                "yuv420p".to_string(),
                 "-c:a".to_string(),
                 "aac".to_string(),
                 "-b:a".to_string(),
                 "160k".to_string(),
-                "-threads".to_string(),
-                "2".to_string(),
             ]);
         }
         other => return Err(format!("未知 strategy: {other}（仅支持 remux/transcode）")),
@@ -217,6 +253,7 @@ fn build_args(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri 命令参数由 invoke 协议决定，无法合并
 pub async fn start_player_session(
     app: AppHandle,
     state: tauri::State<'_, MediaServerState>,
@@ -225,6 +262,7 @@ pub async fn start_player_session(
     dir_name: String,
     strategy: String,
     start_time: Option<f64>,
+    prefer_hardware: Option<bool>,
 ) -> Result<PlayerSessionInfo, String> {
     sanitize_token(&session_id)?;
     sanitize_token(&dir_name)?;
@@ -256,6 +294,7 @@ pub async fn start_player_session(
         &dir,
         &strategy,
         start_time,
+        prefer_hardware.unwrap_or(false),
     )?;
     crate::debug!(
         "[media-server] starting ffmpeg: {} {}",
@@ -476,7 +515,7 @@ mod tests {
     #[test]
     fn build_args_transcode_includes_hls_flags() {
         let dir = Path::new("/tmp/fake-session");
-        let args = build_args("/input.mkv", dir, "transcode", None).unwrap();
+        let args = build_args("/input.mkv", dir, "transcode", None, false).unwrap();
         assert!(args.contains(&"-f".to_string()));
         assert!(args.contains(&"hls".to_string()));
         assert!(args.contains(&"temp_file+omit_endlist".to_string()));
@@ -487,13 +526,13 @@ mod tests {
     #[test]
     fn build_args_rejects_unknown_strategy() {
         let dir = Path::new("/tmp/fake-session");
-        assert!(build_args("/input.mkv", dir, "nuke", None).is_err());
+        assert!(build_args("/input.mkv", dir, "nuke", None, false).is_err());
     }
 
     #[test]
     fn build_args_remux_uses_copy() {
         let dir = Path::new("/tmp/fake-session");
-        let args = build_args("/input.mkv", dir, "remux", None).unwrap();
+        let args = build_args("/input.mkv", dir, "remux", None, false).unwrap();
         let copy_idx = args.iter().position(|a| a == "copy");
         let codec_idx = args.iter().position(|a| a == "-c");
         assert!(copy_idx.is_some() && codec_idx.is_some());
@@ -502,7 +541,7 @@ mod tests {
     #[test]
     fn build_args_inserts_ss_before_input_when_start_time_positive() {
         let dir = Path::new("/tmp/fake-session");
-        let args = build_args("/input.mkv", dir, "transcode", Some(85.5)).unwrap();
+        let args = build_args("/input.mkv", dir, "transcode", Some(85.5), false).unwrap();
         let ss_idx = args.iter().position(|a| a == "-ss");
         let i_idx = args.iter().position(|a| a == "-i");
         assert!(ss_idx.is_some(), "应有 -ss 参数");
@@ -518,10 +557,10 @@ mod tests {
     #[test]
     fn build_args_omits_ss_when_start_time_zero_or_none() {
         let dir = Path::new("/tmp/fake-session");
-        let args_none = build_args("/input.mkv", dir, "transcode", None).unwrap();
+        let args_none = build_args("/input.mkv", dir, "transcode", None, false).unwrap();
         assert!(!args_none.contains(&"-ss".to_string()), "None 不应有 -ss");
 
-        let args_zero = build_args("/input.mkv", dir, "transcode", Some(0.0)).unwrap();
+        let args_zero = build_args("/input.mkv", dir, "transcode", Some(0.0), false).unwrap();
         assert!(!args_zero.contains(&"-ss".to_string()), "0.0 不应有 -ss");
     }
 
@@ -529,11 +568,53 @@ mod tests {
     fn build_args_never_includes_copyts() {
         // timelineOffset 方案要求分片 PTS 从 0 开始，必须移除 -copyts
         let dir = Path::new("/tmp/fake-session");
-        let args = build_args("/input.mkv", dir, "transcode", Some(60.0)).unwrap();
+        let args = build_args("/input.mkv", dir, "transcode", Some(60.0), false).unwrap();
         assert!(
             !args.contains(&"-copyts".to_string()),
             "不应包含 -copyts（会破坏 hls.js timelineOffset）"
         );
+    }
+
+    #[test]
+    fn build_args_software_transcode_uses_libx264_with_threads() {
+        let dir = Path::new("/tmp/fake-session");
+        let args = build_args("/input.mkv", dir, "transcode", None, false).unwrap();
+        assert!(args.contains(&"libx264".to_string()));
+        assert!(args.contains(&"-threads".to_string()));
+        assert!(args.contains(&"2".to_string()));
+    }
+
+    #[test]
+    fn build_args_hardware_transcode_uses_platform_encoder() {
+        let dir = Path::new("/tmp/fake-session");
+        let args = build_args("/input.mkv", dir, "transcode", None, true).unwrap();
+        #[cfg(target_os = "macos")]
+        {
+            // macOS：VideoToolbox（码率制，无 CRF/threads）
+            assert!(args.contains(&"h264_videotoolbox".to_string()));
+            assert!(args.contains(&"-b:v".to_string()));
+            assert!(args.contains(&"4M".to_string()));
+            assert!(args.contains(&"-allow_sw".to_string()));
+            // 硬件编码不应带 -threads（与软件编码区分）
+            assert!(!args.contains(&"-threads".to_string()));
+            // 不应出现 libx264
+            assert!(!args.contains(&"libx264".to_string()));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // 其他平台 prefer_hardware 仍走 libx264（暂无可靠硬件编码器分支）
+            assert!(args.contains(&"libx264".to_string()));
+        }
+    }
+
+    #[test]
+    fn build_args_remux_ignores_prefer_hardware() {
+        // remux 不重编码，prefer_hardware 无影响
+        let dir = Path::new("/tmp/fake-session");
+        let args = build_args("/input.mkv", dir, "remux", None, true).unwrap();
+        assert!(args.contains(&"copy".to_string()));
+        assert!(!args.contains(&"libx264".to_string()));
+        assert!(!args.contains(&"h264_videotoolbox".to_string()));
     }
 
     #[test]

@@ -64,6 +64,8 @@ export interface HlsSession {
   strategy: HlsStrategy;
   /** 实际采用的起始偏移（秒，0 表示从头）。对应 hls.js timelineOffset。 */
   startTime: number;
+  /** 是否采用了硬件编码（false=软件 libx264）。 */
+  preferHardware: boolean;
   /** 停止该 session 的 ffmpeg 进程并清理临时目录。幂等。 */
   stop(): Promise<void>;
 }
@@ -73,61 +75,124 @@ export async function getMediaServerOrigin(): Promise<MediaServerOrigin> {
   return invoke<MediaServerOrigin>("get_media_server_origin");
 }
 
+/** playlist 出现有效分片前等待的最大时长（健康检查用）。 */
+const PLAYLIST_HEALTH_DELAY_MS = 2000;
+
 /**
- * 启动一个 HLS session，返回 playlist URL 与停止句柄。
- *
- * 内部生成 session_id 与 dir_name（基于时间戳，避免目录冲突）。
- * 调用方负责在切换视频或组件卸载时调用 `stop()`。
- *
- * 策略由调用方通过 `chooseStrategy(probe(path))` 决定；本函数不内置
- * 运行时回退——remux 仅对 h264 8bit 选用，该场景 copy 进 fMP4 极稳定。
- *
- * `startTime` 用于 seek 重启：FFmpeg 用 `-ss startTime` 跳转，前端 hls.js 用
- * `timelineOffset: startTime` 让时间轴显示为源视频绝对时间（非 0）。
+ * 检测 playlist 是否已生成至少一个分片（ffmpeg 启动成功标志）。
+ * 硬件编码器不可用时 ffmpeg 会很快退出，playlist 不会有分片。
  */
-export async function startHlsSession(params: {
+export async function isPlaylistHealthy(playlistUrl: string): Promise<boolean> {
+  try {
+    const resp = await fetch(playlistUrl, { cache: "no-store" });
+    if (!resp.ok) return false;
+    const text = await resp.text();
+    // 有效 HLS playlist 含 #EXTINF（分片时长条目）或 #EXT-X-TARGETDURATION + 分片
+    return text.includes("#EXTINF");
+  } catch {
+    return false;
+  }
+}
+
+function normalizeStartTime(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
+}
+
+/**
+ * 启动单个 HLS session（不做健康检查/回退）。
+ * 返回 session 句柄与用于健康检查的 playlistUrl。
+ */
+async function spawnSession(params: {
   inputPath: string;
   strategy: HlsStrategy;
-  startTime?: number;
+  startTime: number;
+  preferHardware: boolean;
 }): Promise<HlsSession> {
-  const { ready } = await getMediaServerOrigin();
-  if (!ready) {
-    throw new Error("本地媒体服务尚未就绪，请稍后重试");
-  }
-
   const sessionId = makeSessionId();
-  // dir_name 仅允许 [A-Za-z0-9_-]，用时间戳 + 随机串构造
   const dirName = `s${Date.now().toString(36)}${Math.random()
     .toString(36)
     .slice(2, 8)}`;
-
-  // 规范化 startTime：非法值（NaN/负数）视为 0（从头）
-  const startTime =
-    typeof params.startTime === "number" &&
-    Number.isFinite(params.startTime) &&
-    params.startTime > 0
-      ? params.startTime
-      : 0;
 
   const info = await invoke<PlayerSessionInfo>("start_player_session", {
     sessionId,
     inputPath: params.inputPath,
     dirName,
     strategy: params.strategy,
-    startTime: startTime > 0 ? startTime : undefined,
+    startTime: params.startTime > 0 ? params.startTime : undefined,
+    preferHardware: params.preferHardware,
   });
 
   let stopped = false;
   return {
     playlistUrl: info.playlistUrl,
     strategy: params.strategy,
-    startTime,
+    startTime: params.startTime,
+    preferHardware: params.preferHardware,
     async stop() {
       if (stopped) return;
       stopped = true;
       await invoke("stop_player_session", { sessionId }).catch(() => {});
     },
   };
+}
+
+/**
+ * 启动一个 HLS session，返回 playlist URL 与停止句柄。
+ *
+ * 内部生成 session_id 与 dir_name（基于时间戳，避免目录冲突）。
+ * 调用方负责在切换视频或组件卸载时调用 `stop()`。
+ *
+ * 策略由调用方通过 `chooseStrategy(probe(path))` 决定。
+ *
+ * `startTime` 用于 seek 重启：FFmpeg 用 `-ss startTime` 跳转，前端 hls.js 用
+ * `timelineOffset: startTime` 让时间轴显示为源视频绝对时间（非 0）。
+ *
+ * `preferHardware`（默认 true）：优先尝试平台硬件编码器（macOS=VideoToolbox）。
+ * 硬件编码器不可用时（playlist 健康检查无分片）自动回退 libx264 软编。
+ *
+ * 资源争用：同时运行本地 Whisper 与软件转码会争抢 CPU；软编 -threads 2 已限制。
+ */
+export async function startHlsSession(params: {
+  inputPath: string;
+  strategy: HlsStrategy;
+  startTime?: number;
+  preferHardware?: boolean;
+}): Promise<HlsSession> {
+  const { ready } = await getMediaServerOrigin();
+  if (!ready) {
+    throw new Error("本地媒体服务尚未就绪，请稍后重试");
+  }
+
+  const startTime = normalizeStartTime(params.startTime);
+  const preferHardware = params.preferHardware !== false; // 默认 true
+
+  // 尝试硬件编码（若启用）
+  if (preferHardware) {
+    const hwSession = await spawnSession({
+      inputPath: params.inputPath,
+      strategy: params.strategy,
+      startTime,
+      preferHardware: true,
+    });
+
+    // 健康检查：等待 ffmpeg 生成首个分片。失败则回退软编。
+    await new Promise((r) => setTimeout(r, PLAYLIST_HEALTH_DELAY_MS));
+    if (await isPlaylistHealthy(hwSession.playlistUrl)) {
+      return hwSession;
+    }
+    // 硬件编码器不可用 → 停止并回退软编
+    await hwSession.stop().catch(() => {});
+  }
+
+  // 软件编码（硬件未启用，或硬件健康检查失败回退）
+  return spawnSession({
+    inputPath: params.inputPath,
+    strategy: params.strategy,
+    startTime,
+    preferHardware: false,
+  });
 }
 
 /**
