@@ -7,6 +7,8 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function seekBy(player: Plyr, seconds: number) {
+  // 注意：键盘小步 seek 越过 HLS 已转码边界时，VideoPlayer 的 seeking 监听会
+  // 拦截并触发 session 重启（而非这里 clamp）。这里只用 duration 做基础 clamp。
   const duration =
     Number.isFinite(player.duration) && player.duration > 0
       ? player.duration

@@ -144,17 +144,30 @@ pub struct MediaServerOrigin {
     pub origin: String,
 }
 
-fn build_args(input_path: &str, dir: &Path, strategy: &str) -> Result<Vec<String>, String> {
+fn build_args(
+    input_path: &str,
+    dir: &Path,
+    strategy: &str,
+    start_time: Option<f64>,
+) -> Result<Vec<String>, String> {
     let dir_str = dir.to_string_lossy();
     let segment_filename = format!("{dir_str}/seg-%05d.m4s");
     let playlist = format!("{dir_str}/index.m3u8");
 
-    let mut args = vec![
-        "-hide_banner".to_string(),
-        "-i".to_string(),
-        input_path.to_string(),
-        "-copyts".to_string(),
-    ];
+    let mut args = vec!["-hide_banner".to_string()];
+
+    // 输入级 -ss（demuxer seek，快速跳转）。放在 -i 前。
+    // 不加 -copyts：让 ffmpeg 把分片 PTS rebase 到 0，
+    // 由前端 hls.js 的 timelineOffset 负责把时间轴平移回 start_time。
+    if let Some(t) = start_time {
+        if t > 0.0 && t.is_finite() {
+            args.push("-ss".to_string());
+            args.push(format!("{t}"));
+        }
+    }
+
+    args.push("-i".to_string());
+    args.push(input_path.to_string());
 
     match strategy {
         "remux" => {
@@ -211,6 +224,7 @@ pub async fn start_player_session(
     input_path: String,
     dir_name: String,
     strategy: String,
+    start_time: Option<f64>,
 ) -> Result<PlayerSessionInfo, String> {
     sanitize_token(&session_id)?;
     sanitize_token(&dir_name)?;
@@ -237,7 +251,12 @@ pub async fn start_player_session(
         .canonicalize()
         .map_err(|e| format!("session 目录无效: {e}"))?;
 
-    let args = build_args(normalized_input.to_string_lossy().as_ref(), &dir, &strategy)?;
+    let args = build_args(
+        normalized_input.to_string_lossy().as_ref(),
+        &dir,
+        &strategy,
+        start_time,
+    )?;
     crate::debug!(
         "[media-server] starting ffmpeg: {} {}",
         FFMPEG_SIDECAR,
@@ -457,7 +476,7 @@ mod tests {
     #[test]
     fn build_args_transcode_includes_hls_flags() {
         let dir = Path::new("/tmp/fake-session");
-        let args = build_args("/input.mkv", dir, "transcode").unwrap();
+        let args = build_args("/input.mkv", dir, "transcode", None).unwrap();
         assert!(args.contains(&"-f".to_string()));
         assert!(args.contains(&"hls".to_string()));
         assert!(args.contains(&"temp_file+omit_endlist".to_string()));
@@ -468,16 +487,53 @@ mod tests {
     #[test]
     fn build_args_rejects_unknown_strategy() {
         let dir = Path::new("/tmp/fake-session");
-        assert!(build_args("/input.mkv", dir, "nuke").is_err());
+        assert!(build_args("/input.mkv", dir, "nuke", None).is_err());
     }
 
     #[test]
     fn build_args_remux_uses_copy() {
         let dir = Path::new("/tmp/fake-session");
-        let args = build_args("/input.mkv", dir, "remux").unwrap();
+        let args = build_args("/input.mkv", dir, "remux", None).unwrap();
         let copy_idx = args.iter().position(|a| a == "copy");
         let codec_idx = args.iter().position(|a| a == "-c");
         assert!(copy_idx.is_some() && codec_idx.is_some());
+    }
+
+    #[test]
+    fn build_args_inserts_ss_before_input_when_start_time_positive() {
+        let dir = Path::new("/tmp/fake-session");
+        let args = build_args("/input.mkv", dir, "transcode", Some(85.5)).unwrap();
+        let ss_idx = args.iter().position(|a| a == "-ss");
+        let i_idx = args.iter().position(|a| a == "-i");
+        assert!(ss_idx.is_some(), "应有 -ss 参数");
+        assert!(i_idx.is_some());
+        assert!(
+            ss_idx.unwrap() < i_idx.unwrap(),
+            "-ss 必须在 -i 之前（输入级 seek）"
+        );
+        // -ss 的值应紧跟其后
+        assert_eq!(args.get(ss_idx.unwrap() + 1), Some(&"85.5".to_string()));
+    }
+
+    #[test]
+    fn build_args_omits_ss_when_start_time_zero_or_none() {
+        let dir = Path::new("/tmp/fake-session");
+        let args_none = build_args("/input.mkv", dir, "transcode", None).unwrap();
+        assert!(!args_none.contains(&"-ss".to_string()), "None 不应有 -ss");
+
+        let args_zero = build_args("/input.mkv", dir, "transcode", Some(0.0)).unwrap();
+        assert!(!args_zero.contains(&"-ss".to_string()), "0.0 不应有 -ss");
+    }
+
+    #[test]
+    fn build_args_never_includes_copyts() {
+        // timelineOffset 方案要求分片 PTS 从 0 开始，必须移除 -copyts
+        let dir = Path::new("/tmp/fake-session");
+        let args = build_args("/input.mkv", dir, "transcode", Some(60.0)).unwrap();
+        assert!(
+            !args.contains(&"-copyts".to_string()),
+            "不应包含 -copyts（会破坏 hls.js timelineOffset）"
+        );
     }
 
     #[test]

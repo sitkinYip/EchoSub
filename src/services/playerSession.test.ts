@@ -83,6 +83,7 @@ describe("startHlsSession", () => {
       "http://127.0.0.1:54321/player/abc/index.m3u8",
     );
     expect(session.strategy).toBe("transcode");
+    expect(session.startTime).toBe(0);
     // start_player_session 必须带 camelCase 参数
     const startCall = mocks.invoke.mock.calls.find(
       (c) => c[0] === "start_player_session",
@@ -138,6 +139,50 @@ describe("startHlsSession", () => {
 
     mocks.invoke.mockRejectedValueOnce(new Error("session gone"));
     await expect(session.stop()).resolves.toBeUndefined();
+  });
+
+  it("forwards startTime to the backend when positive", async () => {
+    mocks.invoke
+      .mockResolvedValueOnce({ ready: true, origin: "http://127.0.0.1:2" })
+      .mockResolvedValueOnce({
+        origin: "http://127.0.0.1:2",
+        baseUrl: "/player/y/",
+        playlistUrl: "http://127.0.0.1:2/player/y/index.m3u8",
+      });
+
+    const session = await startHlsSession({
+      inputPath: "/v.mkv",
+      strategy: "transcode",
+      startTime: 125.5,
+    });
+
+    expect(session.startTime).toBe(125.5);
+    const startCall = mocks.invoke.mock.calls.find(
+      (c) => c[0] === "start_player_session",
+    );
+    expect(startCall?.[1]).toMatchObject({ startTime: 125.5 });
+  });
+
+  it("normalizes invalid startTime to 0 (undefined to backend)", async () => {
+    mocks.invoke
+      .mockResolvedValueOnce({ ready: true, origin: "http://127.0.0.1:3" })
+      .mockResolvedValueOnce({
+        origin: "http://127.0.0.1:3",
+        baseUrl: "/player/z/",
+        playlistUrl: "http://127.0.0.1:3/player/z/index.m3u8",
+      });
+
+    const session = await startHlsSession({
+      inputPath: "/v.mkv",
+      strategy: "transcode",
+      startTime: -10, // 负数 → 视为 0
+    });
+
+    expect(session.startTime).toBe(0);
+    const startCall = mocks.invoke.mock.calls.find(
+      (c) => c[0] === "start_player_session",
+    );
+    expect(startCall?.[1].startTime).toBeUndefined();
   });
 });
 

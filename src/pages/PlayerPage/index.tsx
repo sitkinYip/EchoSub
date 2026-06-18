@@ -24,14 +24,20 @@ export default function PlayerPage() {
   const [vttBlobUrl, setVttBlobUrl] = useState("");
   const [playbackPath, setPlaybackPath] = useState("");
   const [hlsUrl, setHlsUrl] = useState("");
+  const [startTime, setStartTime] = useState(0);
+  const [sourceDuration, setSourceDuration] = useState(0);
   const [loadError, setLoadError] = useState("");
   const [hlsLoading, setHlsLoading] = useState(false);
+  const [seekPreparing, setSeekPreparing] = useState(false);
   const [compatProgress, setCompatProgress] = useState("");
   const [makingCompatCopy, setMakingCompatCopy] = useState(false);
   const tempPlaybackByEntryRef = useRef<Record<string, string>>({});
   const blobRef = useRef("");
   // 当前活跃的 HLS session；切视频/卸载时停止
   const hlsSessionRef = useRef<HlsSession | null>(null);
+  // seek 防抖：拖动进度条时高频触发 seeking，只在停手后重启 session
+  const seekDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekTargetRef = useRef(0);
 
   const getEntryKey = useCallback((entry: HistoryEntry) => `${entry.id}:${entry.videoPath}`, []);
 
@@ -49,6 +55,10 @@ export default function PlayerPage() {
   useEffect(
     () => () => {
       if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+      if (seekDebounceRef.current) {
+        clearTimeout(seekDebounceRef.current);
+        seekDebounceRef.current = null;
+      }
       if (hlsSessionRef.current) {
         hlsSessionRef.current.stop().catch(() => {});
         hlsSessionRef.current = null;
@@ -71,15 +81,22 @@ export default function PlayerPage() {
             URL.revokeObjectURL(blobRef.current);
             blobRef.current = "";
           }
-          // 切换视频前停止上一个 HLS session
+          // 切换视频前停止上一个 HLS session + 清理 seek 防抖
           if (hlsSessionRef.current) {
             hlsSessionRef.current.stop().catch(() => {});
             hlsSessionRef.current = null;
+          }
+          if (seekDebounceRef.current) {
+            clearTimeout(seekDebounceRef.current);
+            seekDebounceRef.current = null;
           }
           setActiveEntry(entry);
           const compatPath = tempPlaybackByEntryRef.current[getEntryKey(entry)];
           setPlaybackPath(compatPath || entry.videoPath);
           setHlsUrl(""); // 先尝试 direct，由 video error 触发 HLS 回退
+          setStartTime(0);
+          setSourceDuration(0);
+          setSeekPreparing(false);
           setVttBlobUrl("");
           setLoadError("");
           setCompatProgress("");
@@ -130,6 +147,8 @@ export default function PlayerPage() {
         try {
           const meta = await probe(activeEntry.videoPath);
           strategy = chooseStrategy(meta);
+          hlsStrategyRef.current = strategy;
+          setSourceDuration(meta.durationSeconds);
         } catch (probeErr) {
           console.warn("[player] probe 失败，回退 transcode:", probeErr);
         }
@@ -139,6 +158,7 @@ export default function PlayerPage() {
           strategy,
         });
         hlsSessionRef.current = session;
+        setStartTime(session.startTime);
         setHlsUrl(session.playlistUrl);
       } catch (err) {
         setLoadError(
@@ -149,6 +169,54 @@ export default function PlayerPage() {
       }
     },
     [activeEntry, stopActiveHlsSession],
+  );
+
+  // 记住当前视频的 HLS 策略（同文件 codec 不变，seek 重启时复用，避免重复 probe）
+  const hlsStrategyRef = useRef<"remux" | "transcode">("transcode");
+
+  /**
+   * seek 到未转码区时重启 session（阶段 5）。
+   * 由 VideoPlayer 的 onSeekBeyondBuffer 触发。
+   * 防抖 300ms：拖动过程高频触发，只在停手后执行一次重启。
+   */
+  const handleSeekBeyondBuffer = useCallback(
+    (targetTime: number) => {
+      if (!activeEntry) return;
+      seekTargetRef.current = targetTime;
+
+      // 清除上一个待执行的防抖，只保留最后一次
+      if (seekDebounceRef.current) {
+        clearTimeout(seekDebounceRef.current);
+      }
+      setSeekPreparing(true);
+
+      seekDebounceRef.current = setTimeout(async () => {
+        seekDebounceRef.current = null;
+        const target = seekTargetRef.current;
+        try {
+          // stop 旧 session → 用 -ss target 启动新 session
+          if (hlsSessionRef.current) {
+            await hlsSessionRef.current.stop().catch(() => {});
+            hlsSessionRef.current = null;
+          }
+          const session = await startHlsSession({
+            inputPath: activeEntry.videoPath,
+            strategy: hlsStrategyRef.current,
+            startTime: target,
+          });
+          hlsSessionRef.current = session;
+          setStartTime(session.startTime);
+          setHlsUrl(session.playlistUrl);
+        } catch (err) {
+          setLoadError(
+            `跳转失败: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        } finally {
+          setSeekPreparing(false);
+        }
+      }, 300);
+    },
+    [activeEntry],
   );
 
   const handleClearError = useCallback(() => setLoadError(""), []);
@@ -275,10 +343,13 @@ export default function PlayerPage() {
               entry={activeEntry}
               sourcePath={playbackPath}
               hlsUrl={hlsUrl}
+              startTime={startTime}
+              sourceDuration={sourceDuration}
               compatCopyPath={activeCompatPath}
               vttBlobUrl={vttBlobUrl}
               onError={handlePlaybackError}
               onClearError={handleClearError}
+              onSeekBeyondBuffer={handleSeekBeyondBuffer}
               onDeleteCompatCopy={handleDeleteCompatibleCopy}
             />
           )
@@ -293,10 +364,10 @@ export default function PlayerPage() {
             </div>
           </div>
         )}
-        {hlsLoading && (
+        {(hlsLoading || seekPreparing) && (
           <div className="absolute bottom-16 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg bg-black/70 text-white text-xs flex items-center gap-2">
             <Icon name="spinner" className="w-4 h-4 animate-spin" />
-            正在启动实时转码...
+            {seekPreparing ? "正在准备目标位置..." : "正在启动实时转码..."}
           </div>
         )}
       </div>

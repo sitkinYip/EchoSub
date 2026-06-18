@@ -5,6 +5,8 @@ import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import Icon from "@/components/Icon";
 import { useKeyboardControls } from "@/pages/PlayerPage/hooks/useKeyboardControls";
+import { shouldSeekBeyondBuffer } from "@/pages/PlayerPage/hooks/seekLogic";
+import { formatDuration } from "@/services/mediaService";
 import type { HistoryEntry } from "@/types";
 
 interface Props {
@@ -12,10 +14,19 @@ interface Props {
   sourcePath?: string;
   /** HLS playlist URL（来自 PlayerPage 启动的 session）。为空时走 direct 播放。 */
   hlsUrl?: string;
+  /**
+   * HLS session 的起始偏移（秒）。对应 hls.js timelineOffset——让播放器时间轴
+   * 显示为源视频绝对时间（如从 45:00 开始而非 0）。仅 hlsUrl 模式有效。
+   */
+  startTime?: number;
+  /** 原视频总时长（秒），用于信息栏显示。来自 probe。 */
+  sourceDuration?: number;
   compatCopyPath?: string;
   vttBlobUrl: string;
   onError: (msg: string) => void;
   onClearError: () => void;
+  /** seek 到未转码区时触发，由 PlayerPage 重启 session。targetTime 为源视频绝对时间。 */
+  onSeekBeyondBuffer?: (targetTime: number) => void;
   onDeleteCompatCopy?: () => void;
 }
 
@@ -23,10 +34,13 @@ export default function VideoPlayer({
   entry,
   sourcePath,
   hlsUrl,
+  startTime,
+  sourceDuration,
   compatCopyPath,
   vttBlobUrl,
   onError,
   onClearError,
+  onSeekBeyondBuffer,
   onDeleteCompatCopy,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,14 +77,26 @@ export default function VideoPlayer({
       video.appendChild(track);
     }
 
-    // ── 源绑定：HLS 走 hls.js/原生，其余 direct ──
+    // ── 源绑定：HLS 走 hls.js，其余 direct ──
+    // seek 决策（阶段 5）：有 startTime 时强制走 hls.js（即使 Safari 原生支持 HLS），
+    // 因为 timelineOffset 只在 hls.js 生效，原生 HLS 无法保证时间轴一致。
+    const forceHlsJs = (startTime ?? 0) > 0;
     if (hlsUrl) {
-      // Safari 原生支持 HLS（application/vnd.apple.mpegurl）
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      const canUseNative = !forceHlsJs && video.canPlayType("application/vnd.apple.mpegurl");
+      if (canUseNative) {
+        // Safari 原生 HLS（仅从头播放的非 seek 场景）
         video.src = hlsUrl;
       } else if (Hls.isSupported()) {
         setLoading(true);
-        const hls = new Hls({ lowLatencyMode: false, enableWorker: true });
+        // timelineOffset 让分片 PTS 整体平移到 startTime，播放器时间轴显示为源视频绝对时间
+        const offset = startTime && startTime > 0 ? startTime : undefined;
+        const hls = new Hls({
+          lowLatencyMode: false,
+          enableWorker: true,
+          timelineOffset: offset,
+          // 起始位置对齐到分片边界，避免 -ss 关键帧导致的起始微小偏差
+          startOnSegmentBoundary: true,
+        });
         hlsRef.current = hls;
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
@@ -145,9 +171,26 @@ export default function VideoPlayer({
       }
     });
 
+    // ── seek 拦截（阶段 5）：拖动到未转码区时通知 PlayerPage 重启 session ──
+    // 仅 HLS 模式 + 提供了 onSeekBeyondBuffer 时生效。
+    const onSeeking = () => {
+      if (!onSeekBeyondBuffer || !hlsUrl) return;
+      const target = video.currentTime;
+      const seekable = video.seekable;
+      if (seekable.length === 0) return;
+      const seekableEnd = seekable.end(seekable.length - 1);
+      if (shouldSeekBeyondBuffer(target, seekableEnd)) {
+        // 回退到 seekable 末尾，避免播放器卡在无分片的位置
+        video.currentTime = seekableEnd;
+        onSeekBeyondBuffer(target);
+      }
+    };
+    video.addEventListener("seeking", onSeeking);
+
     playerRef.current = player;
 
     return () => {
+      video.removeEventListener("seeking", onSeeking);
       // 销毁 hls.js 实例（若有）；Plyr 销毁
       if (hlsRef.current) {
         hlsRef.current.destroy();
@@ -157,7 +200,7 @@ export default function VideoPlayer({
       playerRef.current = null;
       setLoading(false);
     };
-  }, [assetUrl, hlsUrl, vttBlobUrl, hasSubtitles, targetLang, onError, onClearError]);
+  }, [assetUrl, hlsUrl, startTime, vttBlobUrl, hasSubtitles, targetLang, onError, onClearError, onSeekBeyondBuffer]);
 
   useEffect(
     () => () => {
@@ -186,6 +229,7 @@ export default function VideoPlayer({
           <p className="text-sm text-app-text truncate">{entry.videoName}</p>
           <p className="text-[10px] text-app-text-tertiary">
             {entry.sourceLang} → {entry.targetLang} · {entry.subtitles.length} 条字幕
+            {sourceDuration && sourceDuration > 0 ? ` · 总时长 ${formatDuration(Math.round(sourceDuration))}` : ""}
           </p>
         </div>
         <span className="text-[10px] text-app-text-tertiary">

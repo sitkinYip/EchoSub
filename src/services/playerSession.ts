@@ -62,6 +62,8 @@ export interface HlsSession {
   playlistUrl: string;
   /** 实际采用的策略（便于 UI 提示）。 */
   strategy: HlsStrategy;
+  /** 实际采用的起始偏移（秒，0 表示从头）。对应 hls.js timelineOffset。 */
+  startTime: number;
   /** 停止该 session 的 ffmpeg 进程并清理临时目录。幂等。 */
   stop(): Promise<void>;
 }
@@ -79,10 +81,14 @@ export async function getMediaServerOrigin(): Promise<MediaServerOrigin> {
  *
  * 策略由调用方通过 `chooseStrategy(probe(path))` 决定；本函数不内置
  * 运行时回退——remux 仅对 h264 8bit 选用，该场景 copy 进 fMP4 极稳定。
+ *
+ * `startTime` 用于 seek 重启：FFmpeg 用 `-ss startTime` 跳转，前端 hls.js 用
+ * `timelineOffset: startTime` 让时间轴显示为源视频绝对时间（非 0）。
  */
 export async function startHlsSession(params: {
   inputPath: string;
   strategy: HlsStrategy;
+  startTime?: number;
 }): Promise<HlsSession> {
   const { ready } = await getMediaServerOrigin();
   if (!ready) {
@@ -95,17 +101,27 @@ export async function startHlsSession(params: {
     .toString(36)
     .slice(2, 8)}`;
 
+  // 规范化 startTime：非法值（NaN/负数）视为 0（从头）
+  const startTime =
+    typeof params.startTime === "number" &&
+    Number.isFinite(params.startTime) &&
+    params.startTime > 0
+      ? params.startTime
+      : 0;
+
   const info = await invoke<PlayerSessionInfo>("start_player_session", {
     sessionId,
     inputPath: params.inputPath,
     dirName,
     strategy: params.strategy,
+    startTime: startTime > 0 ? startTime : undefined,
   });
 
   let stopped = false;
   return {
     playlistUrl: info.playlistUrl,
     strategy: params.strategy,
+    startTime,
     async stop() {
       if (stopped) return;
       stopped = true;
