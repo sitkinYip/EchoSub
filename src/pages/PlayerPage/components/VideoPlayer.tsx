@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import Hls from "hls.js";
 import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import Icon from "@/components/Icon";
@@ -9,6 +10,8 @@ import type { HistoryEntry } from "@/types";
 interface Props {
   entry: HistoryEntry;
   sourcePath?: string;
+  /** HLS playlist URL（来自 PlayerPage 启动的 session）。为空时走 direct 播放。 */
+  hlsUrl?: string;
   compatCopyPath?: string;
   vttBlobUrl: string;
   onError: (msg: string) => void;
@@ -19,6 +22,7 @@ interface Props {
 export default function VideoPlayer({
   entry,
   sourcePath,
+  hlsUrl,
   compatCopyPath,
   vttBlobUrl,
   onError,
@@ -27,16 +31,16 @@ export default function VideoPlayer({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
-  const [assetUrl, setAssetUrl] = useState("");
+  const hlsRef = useRef<Hls | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useKeyboardControls({ playerRef });
 
   const hasSubtitles = vttBlobUrl !== "";
   const targetLang = entry.targetLang;
 
-  useEffect(() => {
-    setAssetUrl(convertFileSrc(sourcePath || entry.videoPath));
-  }, [entry.videoPath, sourcePath]);
+  // 派生播放源：HLS 模式用 hlsUrl，否则 convertFileSrc 直出
+  const assetUrl = hlsUrl || convertFileSrc(sourcePath || entry.videoPath);
 
   useEffect(() => {
     if (!containerRef.current || !assetUrl) return;
@@ -46,7 +50,6 @@ export default function VideoPlayer({
     container.innerHTML = "";
 
     const video = document.createElement("video");
-    video.src = assetUrl;
     video.crossOrigin = "anonymous";
     video.playsInline = true;
     video.className = "w-full h-full";
@@ -58,6 +61,31 @@ export default function VideoPlayer({
       track.src = vttBlobUrl;
       track.default = true;
       video.appendChild(track);
+    }
+
+    // ── 源绑定：HLS 走 hls.js/原生，其余 direct ──
+    if (hlsUrl) {
+      // Safari 原生支持 HLS（application/vnd.apple.mpegurl）
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = hlsUrl;
+      } else if (Hls.isSupported()) {
+        setLoading(true);
+        const hls = new Hls({ lowLatencyMode: false, enableWorker: true });
+        hlsRef.current = hls;
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => setLoading(false));
+        // 致命错误上报给 PlayerPage，由其决定回退
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            onError(`HLS 播放失败: ${data.details || data.type}`);
+          }
+        });
+      } else {
+        onError("当前 WebView 不支持 HLS 播放");
+      }
+    } else {
+      video.src = assetUrl;
     }
 
     container.appendChild(video);
@@ -111,20 +139,32 @@ export default function VideoPlayer({
 
     video.addEventListener("error", () => {
       const err = video.error;
-      if (err) onError(`无法播放: ${err.message || "未知错误"} (code ${err.code})`);
+      if (err) {
+        // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED（HEVC/MKV 等典型失败）
+        onError(`无法播放: ${err.message || "未知错误"} (code ${err.code})`);
+      }
     });
 
     playerRef.current = player;
 
     return () => {
+      // 销毁 hls.js 实例（若有）；Plyr 销毁
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
       player.destroy();
       playerRef.current = null;
+      setLoading(false);
     };
-  }, [assetUrl, vttBlobUrl, hasSubtitles, targetLang, onError, onClearError]);
+  }, [assetUrl, hlsUrl, vttBlobUrl, hasSubtitles, targetLang, onError, onClearError]);
 
   useEffect(
     () => () => {
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
       playerRef.current?.destroy();
+      playerRef.current = null;
     },
     [],
   );
@@ -132,7 +172,7 @@ export default function VideoPlayer({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex-1 min-h-0 relative">
-        {!assetUrl ? (
+        {!assetUrl || loading ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-white/60 animate-spin" />
           </div>

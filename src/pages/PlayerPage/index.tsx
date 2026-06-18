@@ -5,6 +5,10 @@ import { showMessage } from "@/components/Toast/create";
 import { runMakePlayableCopy } from "@/services/ffmpegService";
 import { useHistoryStore } from "@/stores/historyStore";
 import { itemsToVtt } from "@/utils/srtParser";
+import {
+  startHlsSession,
+  type HlsSession,
+} from "@/services/playerSession";
 import VideoSidebar from "./components/VideoSidebar";
 import VideoPlayer from "./components/VideoPlayer";
 import type { HistoryEntry } from "@/types";
@@ -17,13 +21,25 @@ export default function PlayerPage() {
   const [activeEntry, setActiveEntry] = useState<HistoryEntry | null>(null);
   const [vttBlobUrl, setVttBlobUrl] = useState("");
   const [playbackPath, setPlaybackPath] = useState("");
+  const [hlsUrl, setHlsUrl] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [hlsLoading, setHlsLoading] = useState(false);
   const [compatProgress, setCompatProgress] = useState("");
   const [makingCompatCopy, setMakingCompatCopy] = useState(false);
   const tempPlaybackByEntryRef = useRef<Record<string, string>>({});
   const blobRef = useRef("");
+  // 当前活跃的 HLS session；切视频/卸载时停止
+  const hlsSessionRef = useRef<HlsSession | null>(null);
 
   const getEntryKey = useCallback((entry: HistoryEntry) => `${entry.id}:${entry.videoPath}`, []);
+
+  const stopActiveHlsSession = useCallback(() => {
+    if (hlsSessionRef.current) {
+      hlsSessionRef.current.stop().catch(() => {});
+      hlsSessionRef.current = null;
+    }
+    setHlsUrl("");
+  }, []);
 
   useEffect(() => {
     if (!historyLoaded) load();
@@ -31,6 +47,10 @@ export default function PlayerPage() {
   useEffect(
     () => () => {
       if (blobRef.current) URL.revokeObjectURL(blobRef.current);
+      if (hlsSessionRef.current) {
+        hlsSessionRef.current.stop().catch(() => {});
+        hlsSessionRef.current = null;
+      }
       for (const path of Object.values(tempPlaybackByEntryRef.current)) {
         invoke("delete_file", { path }).catch(() => {});
       }
@@ -41,41 +61,93 @@ export default function PlayerPage() {
 
   const completed = history.filter((e) => e.status === "completed" && e.subtitles.length > 0);
 
-  const handleSelect = useCallback((entry: HistoryEntry) => {
-    invoke("get_file_info", { path: entry.videoPath })
-      .then(() => {
-        if (blobRef.current) {
-          URL.revokeObjectURL(blobRef.current);
-          blobRef.current = "";
-        }
-        setActiveEntry(entry);
-        const compatPath = tempPlaybackByEntryRef.current[getEntryKey(entry)];
-        setPlaybackPath(compatPath || entry.videoPath);
-        setVttBlobUrl("");
-        setLoadError("");
-        setCompatProgress("");
-        setMakingCompatCopy(false);
+  const handleSelect = useCallback(
+    (entry: HistoryEntry) => {
+      invoke("get_file_info", { path: entry.videoPath })
+        .then(() => {
+          if (blobRef.current) {
+            URL.revokeObjectURL(blobRef.current);
+            blobRef.current = "";
+          }
+          // 切换视频前停止上一个 HLS session
+          if (hlsSessionRef.current) {
+            hlsSessionRef.current.stop().catch(() => {});
+            hlsSessionRef.current = null;
+          }
+          setActiveEntry(entry);
+          const compatPath = tempPlaybackByEntryRef.current[getEntryKey(entry)];
+          setPlaybackPath(compatPath || entry.videoPath);
+          setHlsUrl(""); // 先尝试 direct，由 video error 触发 HLS 回退
+          setVttBlobUrl("");
+          setLoadError("");
+          setCompatProgress("");
+          setMakingCompatCopy(false);
+          setHlsLoading(false);
 
-        const vtt = itemsToVtt(entry.subtitles);
-        const blob = new Blob([vtt], { type: "text/vtt" });
-        const url = URL.createObjectURL(blob);
-        blobRef.current = url;
-        setVttBlobUrl(url);
-      })
-      .catch(() => {
-        showMessage({
-          type: "error",
-          title: "视频文件已丢失",
-          description: "原文件已被移动或删除，无法播放。",
+          const vtt = itemsToVtt(entry.subtitles);
+          const blob = new Blob([vtt], { type: "text/vtt" });
+          const url = URL.createObjectURL(blob);
+          blobRef.current = url;
+          setVttBlobUrl(url);
+        })
+        .catch(() => {
+          showMessage({
+            type: "error",
+            title: "视频文件已丢失",
+            description: "原文件已被移动或删除，无法播放。",
+          });
         });
-      });
-  }, [getEntryKey]);
+    },
+    [getEntryKey],
+  );
+
+  /**
+   * direct 播放失败时回退到 HLS 转码。
+   * 由 VideoPlayer 的 video error（code 4 等）触发。
+   */
+  const handlePlaybackError = useCallback(
+    async (msg: string) => {
+      // 已经在 HLS 模式下还失败 → 不再重试，交给兼容副本兜底
+      if (hlsSessionRef.current) {
+        stopActiveHlsSession();
+        setLoadError(msg);
+        return;
+      }
+
+      // direct 失败 → 尝试 HLS 转码
+      if (!activeEntry) {
+        setLoadError(msg);
+        return;
+      }
+      setHlsLoading(true);
+      setLoadError("");
+      try {
+        const session = await startHlsSession({
+          inputPath: activeEntry.videoPath,
+          strategy: "transcode",
+        });
+        hlsSessionRef.current = session;
+        setHlsUrl(session.playlistUrl);
+      } catch (err) {
+        setLoadError(
+          `无法启动实时转码: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      } finally {
+        setHlsLoading(false);
+      }
+    },
+    [activeEntry, stopActiveHlsSession],
+  );
+
+  const handleClearError = useCallback(() => setLoadError(""), []);
 
   const handleMakeCompatibleCopy = useCallback(async () => {
     if (!activeEntry || makingCompatCopy) return;
     const entryKey = getEntryKey(activeEntry);
     const existingPath = tempPlaybackByEntryRef.current[entryKey];
     if (existingPath) {
+      // 切到兼容副本前先停 HLS
+      stopActiveHlsSession();
       setPlaybackPath(existingPath);
       setCompatProgress("");
       setLoadError("");
@@ -96,6 +168,7 @@ export default function PlayerPage() {
       }
 
       tempPlaybackByEntryRef.current[entryKey] = outputPath;
+      stopActiveHlsSession();
       setPlaybackPath(outputPath);
       setCompatProgress("");
       setLoadError("");
@@ -104,7 +177,7 @@ export default function PlayerPage() {
     } finally {
       setMakingCompatCopy(false);
     }
-  }, [activeEntry, getEntryKey, makingCompatCopy]);
+  }, [activeEntry, getEntryKey, makingCompatCopy, stopActiveHlsSession]);
 
   const handleDeleteCompatibleCopy = useCallback(async () => {
     if (!activeEntry) return;
@@ -119,15 +192,15 @@ export default function PlayerPage() {
     setLoadError("兼容副本已删除，当前视频将尝试使用原文件播放。");
   }, [activeEntry, getEntryKey]);
 
-  const isUnsupportedMediaError = loadError.includes("code 4");
+  const isUnsupportedMediaError = loadError.includes("code 4") || loadError.includes("HLS");
   const sourceExt = activeEntry?.videoName.split(".").pop()?.toLowerCase() || "";
   const activeCompatPath = activeEntry
     ? tempPlaybackByEntryRef.current[getEntryKey(activeEntry)] || ""
     : "";
   const compatHint =
     sourceExt === "mkv"
-      ? "当前播放器基于系统 WebView，MKV/HEVC 10bit 常会触发 code 4。外部播放器能播不代表 WebView 能直接解码。"
-      : "当前系统 WebView 无法直接解码这个文件，生成 MP4 兼容副本后通常可以播放。";
+      ? "当前播放器基于系统 WebView，MKV/HEVC 10bit 常会触发 code 4。已尝试实时 HLS 转码，若仍失败可生成完整兼容副本。"
+      : "当前系统 WebView 无法直接解码这个文件，已尝试实时 HLS 转码，若仍失败可生成完整兼容副本。";
 
   return (
     <div className="flex h-full">
@@ -189,10 +262,11 @@ export default function PlayerPage() {
             <VideoPlayer
               entry={activeEntry}
               sourcePath={playbackPath}
+              hlsUrl={hlsUrl}
               compatCopyPath={activeCompatPath}
               vttBlobUrl={vttBlobUrl}
-              onError={setLoadError}
-              onClearError={() => setLoadError("")}
+              onError={handlePlaybackError}
+              onClearError={handleClearError}
               onDeleteCompatCopy={handleDeleteCompatibleCopy}
             />
           )
@@ -205,6 +279,12 @@ export default function PlayerPage() {
               <h2 className="text-lg font-medium text-app-text-secondary mb-1">选择视频</h2>
               <p className="text-sm text-app-text-tertiary">从左侧列表选择已翻译的视频开始播放</p>
             </div>
+          </div>
+        )}
+        {hlsLoading && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg bg-black/70 text-white text-xs flex items-center gap-2">
+            <Icon name="spinner" className="w-4 h-4 animate-spin" />
+            正在启动实时转码...
           </div>
         )}
       </div>
