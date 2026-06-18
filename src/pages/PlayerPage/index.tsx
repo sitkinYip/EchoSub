@@ -3,9 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import Icon from "@/components/Icon";
 import { showMessage } from "@/components/Toast/create";
 import { runMakePlayableCopy } from "@/services/ffmpegService";
+import { probe } from "@/services/mediaService";
 import { useHistoryStore } from "@/stores/historyStore";
 import { itemsToVtt } from "@/utils/srtParser";
 import {
+  chooseStrategy,
   startHlsSession,
   type HlsSession,
 } from "@/services/playerSession";
@@ -102,8 +104,9 @@ export default function PlayerPage() {
   );
 
   /**
-   * direct 播放失败时回退到 HLS 转码。
+   * direct 播放失败时回退到 HLS。
    * 由 VideoPlayer 的 video error（code 4 等）触发。
+   * 先 probe 拿 codec，按 chooseStrategy 选 remux（h264 8bit）或 transcode。
    */
   const handlePlaybackError = useCallback(
     async (msg: string) => {
@@ -114,7 +117,7 @@ export default function PlayerPage() {
         return;
       }
 
-      // direct 失败 → 尝试 HLS 转码
+      // direct 失败 → 尝试 HLS
       if (!activeEntry) {
         setLoadError(msg);
         return;
@@ -122,9 +125,18 @@ export default function PlayerPage() {
       setHlsLoading(true);
       setLoadError("");
       try {
+        // probe 拿 codec 决定 remux vs transcode；probe 失败则保守走 transcode
+        let strategy: "remux" | "transcode" = "transcode";
+        try {
+          const meta = await probe(activeEntry.videoPath);
+          strategy = chooseStrategy(meta);
+        } catch (probeErr) {
+          console.warn("[player] probe 失败，回退 transcode:", probeErr);
+        }
+
         const session = await startHlsSession({
           inputPath: activeEntry.videoPath,
-          strategy: "transcode",
+          strategy,
         });
         hlsSessionRef.current = session;
         setHlsUrl(session.playlistUrl);

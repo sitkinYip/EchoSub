@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { MediaMeta } from "./mediaService";
 
 /**
  * 播放器 HLS session 编排层。
@@ -9,7 +10,9 @@ import { invoke } from "@tauri-apps/api/core";
  * spawn 的 ffmpeg 管理 HLS 进程，两者互不干扰。
  *
  * 典型用法：
- *   const session = await startHlsSession({ inputPath, strategy: "transcode" });
+ *   const meta = await probe(inputPath);
+ *   const strategy = chooseStrategy(meta);
+ *   const session = await startHlsSession({ inputPath, strategy });
  *   // session.playlistUrl 给 video.src / hls.loadSource
  *   await session.stop();  // 切换视频或卸载时调用
  */
@@ -27,6 +30,25 @@ interface MediaServerOrigin {
   origin: string;
 }
 
+/**
+ * 根据 probe 结果选择 HLS 策略：remux（copy）还是 transcode（重编码）。
+ *
+ * 决策表（保守优先兼容性）：
+ * - h264 + 非10bit → remux（视频直接 copy 进 fMP4，几乎零 CPU）
+ * - hevc/vp9/av1/mpeg4 等或 10bit 或 probe 拿不到 codec → transcode
+ *
+ * remux 时音频也 copy：源若是 aac 自然兼容；若是 ac3/eac3，fMP4 可封装且
+ * 多数 WebView 能解，少数不能则用户可走完整兼容副本兜底。
+ */
+export function chooseStrategy(meta: Pick<MediaMeta, "videoCodec" | "isTenBit">): HlsStrategy {
+  const codec = meta.videoCodec?.toLowerCase();
+  // 仅 H.264（含 avc 别名）+ 8bit 才 remux；其余一律 transcode
+  if ((codec === "h264" || codec === "avc") && !meta.isTenBit) {
+    return "remux";
+  }
+  return "transcode";
+}
+
 /** 生成 session_id：复用 pipelineSession 的 crypto.randomUUID 策略。 */
 function makeSessionId(): string {
   return (
@@ -38,6 +60,8 @@ function makeSessionId(): string {
 export interface HlsSession {
   /** 给 video.src / hls.loadSource 的完整 playlist URL。 */
   playlistUrl: string;
+  /** 实际采用的策略（便于 UI 提示）。 */
+  strategy: HlsStrategy;
   /** 停止该 session 的 ffmpeg 进程并清理临时目录。幂等。 */
   stop(): Promise<void>;
 }
@@ -52,6 +76,9 @@ export async function getMediaServerOrigin(): Promise<MediaServerOrigin> {
  *
  * 内部生成 session_id 与 dir_name（基于时间戳，避免目录冲突）。
  * 调用方负责在切换视频或组件卸载时调用 `stop()`。
+ *
+ * 策略由调用方通过 `chooseStrategy(probe(path))` 决定；本函数不内置
+ * 运行时回退——remux 仅对 h264 8bit 选用，该场景 copy 进 fMP4 极稳定。
  */
 export async function startHlsSession(params: {
   inputPath: string;
@@ -78,6 +105,7 @@ export async function startHlsSession(params: {
   let stopped = false;
   return {
     playlistUrl: info.playlistUrl,
+    strategy: params.strategy,
     async stop() {
       if (stopped) return;
       stopped = true;

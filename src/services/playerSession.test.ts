@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import {
+  chooseStrategy,
   getMediaServerOrigin,
   prefersDirectPlayback,
   startHlsSession,
@@ -81,6 +82,7 @@ describe("startHlsSession", () => {
     expect(session.playlistUrl).toBe(
       "http://127.0.0.1:54321/player/abc/index.m3u8",
     );
+    expect(session.strategy).toBe("transcode");
     // start_player_session 必须带 camelCase 参数
     const startCall = mocks.invoke.mock.calls.find(
       (c) => c[0] === "start_player_session",
@@ -136,5 +138,28 @@ describe("startHlsSession", () => {
 
     mocks.invoke.mockRejectedValueOnce(new Error("session gone"));
     await expect(session.stop()).resolves.toBeUndefined();
+  });
+});
+
+describe("chooseStrategy", () => {
+  it("chooses remux for h264 8bit", () => {
+    expect(chooseStrategy({ videoCodec: "h264", isTenBit: false })).toBe("remux");
+    // avc 是 h264 的别名
+    expect(chooseStrategy({ videoCodec: "avc", isTenBit: false })).toBe("remux");
+    // 大小写不敏感
+    expect(chooseStrategy({ videoCodec: "H264", isTenBit: false })).toBe("remux");
+  });
+
+  it("chooses transcode for hevc / vp9 / av1 / 10bit", () => {
+    expect(chooseStrategy({ videoCodec: "hevc", isTenBit: false })).toBe("transcode");
+    expect(chooseStrategy({ videoCodec: "vp9", isTenBit: false })).toBe("transcode");
+    expect(chooseStrategy({ videoCodec: "av1", isTenBit: false })).toBe("transcode");
+    // h264 但 10bit 仍需转码
+    expect(chooseStrategy({ videoCodec: "h264", isTenBit: true })).toBe("transcode");
+  });
+
+  it("falls back to transcode when codec is unknown", () => {
+    expect(chooseStrategy({ videoCodec: undefined, isTenBit: false })).toBe("transcode");
+    expect(chooseStrategy({ videoCodec: "mpeg4", isTenBit: false })).toBe("transcode");
   });
 });

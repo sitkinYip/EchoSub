@@ -8,15 +8,93 @@ export interface MediaMeta {
   height: number;
   durationSeconds: number;
   size: number;
+  /** 视频编码（hevc/h264/vp9/av1 等），probe 失败时为 undefined。 */
+  videoCodec?: string;
+  /** 音频编码（aac/ac3/opus/flac 等），probe 失败时为 undefined。 */
+  audioCodec?: string;
+  /** 像素格式（yuv420p/yuv420p10le 等），用于判断 10bit。 */
+  pixelFormat?: string;
+  /** 是否 10bit 及以上（yuv420p10le/p010le 等）。 */
+  isTenBit: boolean;
+}
+
+/**
+ * 从 ffmpeg `-i` 的 stderr 输出解析流信息。
+ * 纯函数，便于单测——不依赖真实 ffmpeg。
+ */
+export function parseStreamInfo(probeText: string): {
+  width: number;
+  height: number;
+  durationSeconds: number;
+  videoCodec?: string;
+  audioCodec?: string;
+  pixelFormat?: string;
+  isTenBit: boolean;
+} {
+  // 分辨率：取最后的 NxN（避免误匹配 codec 标签里的数字）
+  let width = 0;
+  let height = 0;
+  const resMatch = probeText.match(/(\d{2,5})x(\d{2,5})/);
+  if (resMatch) {
+    width = parseInt(resMatch[1], 10);
+    height = parseInt(resMatch[2], 10);
+  }
+
+  // 时长：Duration: HH:MM:SS.xx
+  let durationSeconds = 0;
+  const durMatch = probeText.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (durMatch) {
+    const seconds =
+      parseInt(durMatch[1], 10) * 3600 +
+      parseInt(durMatch[2], 10) * 60 +
+      parseFloat(durMatch[3]);
+    durationSeconds = seconds > 0 ? Math.max(1, Math.round(seconds)) : 0;
+  }
+
+  // 视频流：Stream #0:0...: Video: <codec> ..., <pixfmt>,
+  // 示例：Video: hevc (Main 10) (hvc1), yuv420p10le(tv), 1920x1080
+  let videoCodec: string | undefined;
+  let pixelFormat: string | undefined;
+  const videoMatch = probeText.match(/Stream #[^:]*:\d+.*?:\s*Video:\s*(\w+)/);
+  if (videoMatch) {
+    videoCodec = videoMatch[1].toLowerCase();
+  }
+  // 像素格式紧跟在 Video: codec 后，逗号分隔的下一项
+  // 尝试匹配 "Video: <codec> (...), <pixfmt>"
+  const pixFmtMatch = probeText.match(
+    /Video:\s*\w+[^,]*,\s*([a-z0-9]+(?:10)?[a-z0-9]*)/i,
+  );
+  if (pixFmtMatch) {
+    pixelFormat = pixFmtMatch[1].toLowerCase();
+  }
+  const isTenBit = /10le|10be|p010/.test(pixelFormat || "");
+
+  // 音频流：Stream #0:1...: Audio: <codec>
+  let audioCodec: string | undefined;
+  const audioMatch = probeText.match(/Stream #[^:]*:\d+.*?:\s*Audio:\s*(\w+)/);
+  if (audioMatch) {
+    audioCodec = audioMatch[1].toLowerCase();
+  }
+
+  return { width, height, durationSeconds, videoCodec, audioCodec, pixelFormat, isTenBit };
 }
 
 export async function probe(filePath: string): Promise<MediaMeta> {
-  const result: MediaMeta = { width: 1920, height: 1080, durationSeconds: 0, size: 0 };
+  const result: MediaMeta = {
+    width: 1920,
+    height: 1080,
+    durationSeconds: 0,
+    size: 0,
+    isTenBit: false,
+  };
   try {
     const info = (await invoke("get_file_info", { path: filePath }).catch(() => ({ size: 0 }))) as {
       size: number;
     };
     result.size = info.size;
+    // 注意：probe 用 execute() 一次性执行（短任务，几秒内完成），
+    // 不进入 ffmpegService 的分组管理。这是已知限制——probe 无需中途取消，
+    // 且 execute() 不返回 child 句柄无法注册。长生命周期的 HLS 由 Rust 端独立管理。
     const cmd = Command.sidecar("binaries/ffmpeg", ["-hide_banner", "-i", filePath]);
     let stderr = "";
     let stdout = "";
@@ -36,17 +114,14 @@ export async function probe(filePath: string): Promise<MediaMeta> {
     }
 
     const probeText = `${stderr}\n${stdout}`;
-    const resMatch = probeText.match(/(\d{2,5})x(\d{2,5})/);
-    if (resMatch) {
-      result.width = parseInt(resMatch[1], 10);
-      result.height = parseInt(resMatch[2], 10);
-    }
-    const durMatch = probeText.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
-    if (durMatch) {
-      const seconds =
-        parseInt(durMatch[1], 10) * 3600 + parseInt(durMatch[2], 10) * 60 + parseFloat(durMatch[3]);
-      result.durationSeconds = seconds > 0 ? Math.max(1, Math.round(seconds)) : 0;
-    }
+    const parsed = parseStreamInfo(probeText);
+    if (parsed.width > 0) result.width = parsed.width;
+    if (parsed.height > 0) result.height = parsed.height;
+    result.durationSeconds = parsed.durationSeconds;
+    result.videoCodec = parsed.videoCodec;
+    result.audioCodec = parsed.audioCodec;
+    result.pixelFormat = parsed.pixelFormat;
+    result.isTenBit = parsed.isTenBit;
   } catch (err) {
     console.warn("[probe] 文件探测失败:", err);
     throw new Error(`无法分析媒体文件: ${err instanceof Error ? err.message : err}`);
