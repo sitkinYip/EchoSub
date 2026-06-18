@@ -90,3 +90,13 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--c-hover);
 }
+
+/* Processing remains scrollable while its transient scrollbar stays out of the interface. */
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}

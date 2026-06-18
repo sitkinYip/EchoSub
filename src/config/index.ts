@@ -65,6 +65,7 @@ export type IconName =
   | "close"
   | "video"
   | "chevron-right"
+  | "chevron-down"
   | "upload"
   | "chat"
   | "spinner"

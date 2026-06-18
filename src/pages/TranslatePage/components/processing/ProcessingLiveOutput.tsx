@@ -1,8 +1,12 @@
 type ProcessingLiveOutputProps = {
   text: string;
+  contained?: boolean;
 };
 
-export default function ProcessingLiveOutput({ text }: ProcessingLiveOutputProps) {
+export default function ProcessingLiveOutput({
+  text,
+  contained = true,
+}: ProcessingLiveOutputProps) {
   if (!text) return null;
 
   return (
@@ -11,7 +15,7 @@ export default function ProcessingLiveOutput({ text }: ProcessingLiveOutputProps
         <p className="text-xs font-medium text-app-text-tertiary">实时输出</p>
         <p className="text-[11px] text-app-text-tertiary">正在接收模型结果</p>
       </div>
-      <div className="max-h-64 overflow-y-auto px-5 py-4">
+      <div className={`${contained ? "max-h-64 overflow-y-auto" : ""} px-5 py-4`}>
         <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-app-text-secondary">
           {text}
         </pre>

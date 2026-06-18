@@ -79,6 +79,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
   ),
   "chevron-right": <path d="M14 5l7 7m0 0l-7 7m7-7H3" />,
+  "chevron-down": <path d="M6 9l6 6 6-6" />,
   upload: (
     <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
   ),

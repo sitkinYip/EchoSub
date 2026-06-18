@@ -2,7 +2,6 @@ import { AUDIO_STEPS, VIDEO_STEPS } from "@/config";
 import type { PipelineRoute, PipelineStep } from "@/pages/TranslatePage/utils/pipelineTypes";
 import ProcessingErrorCard from "./ProcessingErrorCard";
 import ProcessingStepList from "./ProcessingStepList";
-import ProcessingSummary from "./ProcessingSummary";
 
 export type ProcessingPanelProps = {
   progressMessage: string;
@@ -52,18 +51,12 @@ function legacySteps(props: ProcessingPanelProps): PipelineStep[] {
 export default function ProcessingPanel(props: ProcessingPanelProps) {
   const steps = props.pipelineSteps?.length ? props.pipelineSteps : legacySteps(props);
   const canCancel = props.pipelinePhase !== null;
-  const legacyModeLabel = `${props.isVideoMode ? "视频" : "音频"}模式`;
 
   return (
     <section className="rounded-2xl bg-app-surface-alt ring-1 ring-app-border">
-      <div className="space-y-5 p-5 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <ProcessingSummary
-            route={props.pipelineRoute ?? null}
-            legacyModeLabel={legacyModeLabel}
-            steps={steps}
-            subtitleCount={props.subtitleCount}
-          />
+      <div className="space-y-4 p-5 sm:p-6">
+        <div className="flex min-h-7 items-center justify-between gap-4">
+          <h2 className="text-xs font-medium text-app-text-tertiary">流程详情</h2>
           {canCancel && (
             <button
               onClick={props.onCancel}
@@ -74,9 +67,7 @@ export default function ProcessingPanel(props: ProcessingPanelProps) {
           )}
         </div>
 
-        <div className="max-h-[52vh] overflow-y-auto pr-1">
-          <ProcessingStepList steps={steps} />
-        </div>
+        <ProcessingStepList steps={steps} />
 
         {props.hasError && <ProcessingErrorCard message={props.hasError} />}
       </div>

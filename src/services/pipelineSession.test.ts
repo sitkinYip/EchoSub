@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.fn();
-const killFfmpeg = vi.fn();
+const killFfmpegGroup = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("./ffmpegService", () => ({ killFfmpeg }));
+vi.mock("./ffmpegService", () => ({ killFfmpegGroup }));
 
 describe("pipelineSession", () => {
   beforeEach(() => {
     vi.resetModules();
     invoke.mockReset();
-    killFfmpeg.mockReset();
+    killFfmpegGroup.mockReset();
     invoke.mockResolvedValue("/tmp/generated.mp3");
   });
 
@@ -25,7 +25,7 @@ describe("pipelineSession", () => {
     expect(second.id).toBe(2);
     expect(invoke).toHaveBeenCalledWith("cancel_task", { taskId: first.taskId });
     expect(invoke).toHaveBeenCalledWith("delete_file", { path: "/tmp/old.mp3" });
-    expect(killFfmpeg).toHaveBeenCalledTimes(1);
+    expect(killFfmpegGroup).toHaveBeenCalledWith("translation");
   });
 
   it("guards state writes from stale sessions", async () => {

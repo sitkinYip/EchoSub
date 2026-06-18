@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useSettingsStore } from "@/stores/settingsStore";
+import Switch from "@/components/Switch";
 import type { ModalContentProps } from "@/config/modals";
 
 interface ApiKeyData {
@@ -9,7 +10,7 @@ interface ApiKeyData {
 }
 
 export default function ApiKeyModal({ close, data }: ModalContentProps<ApiKeyData>) {
-  const { apiKey, sourceLang, targetLang, uploadVideo, update } = useSettingsStore();
+  const { apiKey, sourceLang, targetLang, uploadVideo, engine, update } = useSettingsStore();
 
   const [key, setKey] = useState(apiKey);
   const [src] = useState(sourceLang);
@@ -53,20 +54,19 @@ export default function ApiKeyModal({ close, data }: ModalContentProps<ApiKeyDat
             className="w-full px-4 py-2.5 bg-app-surface ring-1 ring-app-border rounded-xl text-app-text placeholder:text-app-text-tertiary focus:outline-none focus:ring-app-border transition-all text-sm"
           />
         </div>
-        <div className="flex items-center justify-between px-3 py-2.5 bg-app-surface-alt rounded-xl ring-1 ring-app-border-light">
-          <div>
-            <p className="text-sm text-app-text">直接上传原视频</p>
-            <p className="text-xs text-app-text-tertiary mt-0.5">跳过音频提取，画面+语音混合识别</p>
+        {engine === "cloud" && (
+          <div className="flex items-start justify-between gap-4 rounded-xl bg-app-surface-alt px-3 py-2.5 ring-1 ring-app-border-light">
+            <div>
+              <p className="text-sm text-app-text">上传原视频</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-app-text-tertiary">
+                开启后云端模型可同时参考画面；关闭则先提取音频。
+              </p>
+            </div>
+            <div className="pt-0.5">
+              <Switch checked={upload} onChange={setUpload} ariaLabel="上传原视频" />
+            </div>
           </div>
-          <button
-            onClick={() => setUpload(!upload)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 transition-colors ${upload ? "bg-app-accent" : "bg-app-hover"}`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${upload ? "translate-x-6" : "translate-x-1"}`}
-            />
-          </button>
-        </div>
+        )}
         <div className="text-xs text-app-text-tertiary space-y-1">
           <p>
             获取 API Key：{" "}

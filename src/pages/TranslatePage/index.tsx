@@ -43,6 +43,7 @@ export default function TranslatePage() {
         sourceLang={sourceLang}
         targetLang={targetLang}
         uploadVideo={uploadVideo}
+        showUploadStrategy={engine === "cloud" && appStep === "idle"}
         hasApiKey={hasApiKey}
         showReset={appStep !== "idle"}
         onUpdate={update}

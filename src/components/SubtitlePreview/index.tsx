@@ -5,9 +5,10 @@ import type { SubtitleItem } from "@/types";
 interface Props {
   items: SubtitleItem[];
   onUpdateText: (index: number, newText: string) => void;
+  contained?: boolean;
 }
 
-export default function SubtitlePreview({ items, onUpdateText }: Props) {
+export default function SubtitlePreview({ items, onUpdateText, contained = true }: Props) {
   const [editIdx, setEditIdx] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,7 +51,11 @@ export default function SubtitlePreview({ items, onUpdateText }: Props) {
         <span className="w-44 text-[11px] text-app-text-tertiary font-medium">时间轴</span>
         <span className="flex-1 text-[11px] text-app-text-tertiary font-medium">字幕内容</span>
       </div>
-      <div className="divide-y divide-app-border-light max-h-[420px] overflow-y-auto">
+      <div
+        className={`divide-y divide-app-border-light ${
+          contained ? "max-h-[420px] overflow-y-auto" : ""
+        }`}
+      >
         {items.map((item, i) => (
           <div
             key={`${item.index}-${item.start}-${i}`}

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TranslationState } from "@/stores/translationStore";
-import { killFfmpeg } from "./ffmpegService";
+import { killFfmpegGroup } from "./ffmpegService";
 
 export type PipelineSession = {
   id: number;
@@ -37,7 +37,7 @@ export function killSession() {
     session.unlisten = null;
   }
   invoke("cancel_task", { taskId: session.taskId }).catch(() => {});
-  killFfmpeg();
+  killFfmpegGroup("translation");
   for (const p of session.tempFiles) {
     invoke("delete_file", { path: p }).catch(() => {});
   }

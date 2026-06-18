@@ -1,6 +1,7 @@
 import Icon from "@/components/Icon";
 import LangSelect from "@/components/LangSelect";
-import Popover from "@/components/Popover";
+import Dropdown from "@/components/Dropdown";
+import Switch from "@/components/Switch";
 import { LANGUAGES } from "@/config";
 import type { LanguageUpdate } from "../utils/types";
 import type { Language } from "@/types";
@@ -9,6 +10,7 @@ type TranslateHeaderProps = {
   sourceLang: Language;
   targetLang: Language;
   uploadVideo: boolean;
+  showUploadStrategy: boolean;
   hasApiKey: boolean;
   showReset: boolean;
   onUpdate: (patch: LanguageUpdate & { uploadVideo?: boolean }) => void;
@@ -20,6 +22,7 @@ export default function TranslateHeader({
   sourceLang,
   targetLang,
   uploadVideo,
+  showUploadStrategy,
   hasApiKey,
   showReset,
   onUpdate,
@@ -43,35 +46,37 @@ export default function TranslateHeader({
             options={LANGUAGES}
           />
 
-          <div className="flex items-center">
-            <button
-              onClick={() => onUpdate({ uploadVideo: !uploadVideo })}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 active:scale-95
-                ${uploadVideo ? "bg-app-accent-bg text-app-accent ring-1 ring-app-accent-ring" : "bg-app-surface text-app-text-tertiary ring-1 ring-app-border-light hover:text-app-text-secondary"}`}
-            >
-              <Icon name="video" className="w-3 h-3" />
-              {uploadVideo ? "视频模式" : "音频模式"}
-            </button>
-            <Popover
-              placement="bottom-end"
-              widthClassName="w-64"
-              title={uploadVideo ? "视频模式" : "音频模式"}
-              content={
-                uploadVideo
-                  ? "AI 通过分析视频画面与音频内容获得更精准的翻译结果。单文件不超过 1GB。"
-                  : "仅提取视频中的音频轨道进行翻译，速度更快，适合纯语音内容。"
+          {showUploadStrategy && (
+            <Dropdown
+              ariaLabel="云端上传策略"
+              trigger={
+                <>
+                  <Icon name="upload" className="h-3 w-3" />
+                  <span>云端上传</span>
+                  <Icon name="chevron-down" className="h-3 w-3 opacity-60" />
+                </>
               }
-              className="ml-1.5"
             >
-              <button
-                type="button"
-                aria-label="上传模式说明"
-                className="w-5 h-5 rounded-md flex items-center justify-center text-app-text-tertiary/40 hover:text-app-text-tertiary hover:bg-app-hover transition-colors cursor-help"
-              >
-                <Icon name="help" className="w-3.5 h-3.5" />
-              </button>
-            </Popover>
-          </div>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-app-text">上传原视频</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-app-text-tertiary">
+                    {uploadVideo
+                      ? "视频将携带画面上传，适合需要视觉上下文的内容。"
+                      : "视频会先提取音频，上传更快，也能减少流量消耗。"}
+                  </p>
+                </div>
+                <Switch
+                  checked={uploadVideo}
+                  onChange={(checked) => onUpdate({ uploadVideo: checked })}
+                  ariaLabel="上传原视频"
+                />
+              </div>
+              <div className="mt-3 border-t border-app-border-light pt-2.5 text-[10px] leading-relaxed text-app-text-tertiary">
+                音频文件始终直接上传；原视频超过 1GB 时会在处理前询问压缩或改用音频。
+              </div>
+            </Dropdown>
+          )}
 
           <button
             onClick={onSettingsClick}

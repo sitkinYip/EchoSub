@@ -2,24 +2,60 @@ import { Command, type Child } from "@tauri-apps/plugin-shell";
 import type { TranslationState } from "@/stores/translationStore";
 
 export type SetState = (p: Partial<TranslationState>) => void;
+export type FfmpegTaskGroup = "translation" | "player" | "probe";
 
-const activeChildren = new Set<Child>();
+const activeChildrenByGroup = new Map<FfmpegTaskGroup, Set<Child>>();
 
-export function killFfmpeg() {
-  for (const child of activeChildren) {
+function registerFfmpegChild(group: FfmpegTaskGroup, child: Child) {
+  let children = activeChildrenByGroup.get(group);
+  if (!children) {
+    children = new Set<Child>();
+    activeChildrenByGroup.set(group, children);
+  }
+  children.add(child);
+}
+
+function unregisterFfmpegChild(group: FfmpegTaskGroup, child: Child) {
+  const children = activeChildrenByGroup.get(group);
+  if (!children) return;
+  children.delete(child);
+  if (children.size === 0) activeChildrenByGroup.delete(group);
+}
+
+export function killFfmpegGroup(group: FfmpegTaskGroup) {
+  const children = activeChildrenByGroup.get(group);
+  if (!children) return;
+
+  // Remove the group first so repeated cancellation is idempotent while kill resolves.
+  activeChildrenByGroup.delete(group);
+  for (const child of children) {
     try {
       child.kill().catch(() => {});
     } catch {
       // Process may already be gone.
     }
   }
-  activeChildren.clear();
+}
+
+export function killAllFfmpeg() {
+  for (const group of [...activeChildrenByGroup.keys()]) {
+    killFfmpegGroup(group);
+  }
+}
+
+/**
+ * Backwards-compatible translation cancellation entry point.
+ * Player/probe jobs must never be cancelled when a translation session ends.
+ */
+export function killFfmpeg() {
+  killFfmpegGroup("translation");
 }
 
 export async function runFfmpeg(
   args: string[],
   progressLabel: string,
   set: SetState,
+  group: FfmpegTaskGroup = "translation",
 ): Promise<boolean> {
   let cmd;
   try {
@@ -101,12 +137,12 @@ export async function runFfmpeg(
     return false;
   }
 
-  activeChildren.add(child);
+  registerFfmpegChild(group, child);
 
   try {
     const result = await exitPromise;
     clearInterval(heartbeat);
-    activeChildren.delete(child);
+    unregisterFfmpegChild(group, child);
 
     // exitCode is null when killed by signal — not an error we should report
     if (result.code !== 0 && result.code !== null) {
@@ -118,7 +154,7 @@ export async function runFfmpeg(
     return true;
   } catch (e: unknown) {
     clearInterval(heartbeat);
-    activeChildren.delete(child);
+    unregisterFfmpegChild(group, child);
     // Silently absorb "killed" errors
     if (e instanceof Error && e.message === "killed") return false;
     set({
@@ -290,12 +326,12 @@ async function runPlayerFfmpeg(
     return false;
   }
 
-  activeChildren.add(child);
+  registerFfmpegChild("player", child);
 
   try {
     const result = await exitPromise;
     clearInterval(heartbeat);
-    activeChildren.delete(child);
+    unregisterFfmpegChild("player", child);
     if (result.code !== 0 && result.code !== null) {
       console.warn("[Player FFmpeg] exit code:", result.code, "\nstderr tail:", buf.slice(-800));
       return false;
@@ -303,7 +339,7 @@ async function runPlayerFfmpeg(
     return true;
   } catch (e) {
     clearInterval(heartbeat);
-    activeChildren.delete(child);
+    unregisterFfmpegChild("player", child);
     onProgress(`FFmpeg 进程异常: ${e instanceof Error ? e.message : String(e)}`);
     return false;
   }
