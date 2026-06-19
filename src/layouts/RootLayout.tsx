@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import Icon from "@/components/Icon";
 import { NAV_ITEMS } from "@/config";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -15,6 +16,13 @@ export default function RootLayout() {
   // Sync theme class to <html>
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
+  }, [theme]);
+
+  // Sync native window theme so the OS-drawn title bar (Windows / macOS) follows the app theme.
+  useEffect(() => {
+    getCurrentWindow()
+      .setTheme(theme)
+      .catch((err) => console.warn("无法同步窗口主题:", err));
   }, [theme]);
 
   useEffect(() => {

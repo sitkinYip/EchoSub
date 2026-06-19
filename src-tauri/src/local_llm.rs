@@ -300,12 +300,21 @@ pub fn get_local_llm_server_status(
 
 fn build_batch_prompt(units_json: &str, source_lang: &str, target_lang: &str) -> String {
     format!(
-        "你是专业字幕翻译引擎。请把 JSON 数组中的 text 从{source_lang}翻译成{target_lang}。\n\
-         严格要求：\n\
-         1. 只输出 JSON 数组，不要 Markdown，不要解释。\n\
-         2. 每个对象必须保留原 id，字段名必须是 id 和 translation。\n\
-         3. 不要合并、拆分、删除或新增条目。\n\
-         4. translation 只放译文，不要包含时间轴或编号。\n\n\
+        "你是专业字幕翻译引擎。把输入 JSON 数组里每条 text 从{source_lang}翻译成{target_lang}，\
+         原样输出一个 JSON 数组。\n\n\
+         输出类型（TypeScript，必须严格符合）：\n\
+         ```ts\n\
+         type TranslationItem = {{ id: number; translation: string }};\n\
+         type Result = TranslationItem[];\n\
+         ```\n\n\
+         规则：\n\
+         1. 只输出 JSON 数组本身，不要 Markdown 代码块、不要任何解释文字。\n\
+         2. 数组长度、每条的 id 必须与输入一一对应，禁止合并、拆分、删除或新增条目。\n\
+         3. translation 只放译文，不含时间轴或编号。\n\
+         4. translation 是 JSON 字符串：内部的双引号必须转义为 \\\"，换行用 \\n。这是最常见的出错点，务必正确转义。\n\n\
+         示例：\n\
+         输入：[{{\"id\":1,\"text\":\"He said \\\"hi\\\".\"}}]\n\
+         输出：[{{\"id\":1,\"translation\":\"他说\\\"你好\\\"。\"}}]\n\n\
          输入 JSON：\n{units_json}"
     )
 }
@@ -323,7 +332,28 @@ async fn call_llama_chat(url: &str, prompt: &str) -> Result<String, String> {
             { "role": "user", "content": prompt }
         ],
         "temperature": 0.1,
-        "stream": false
+        "stream": false,
+        // 结构化输出强约束：在 token 层面强制模型只能输出符合该 schema 的合法 JSON，
+        // 从根源上杜绝「漏闭合引号」等格式错误（llama-server 的 json_schema 等效 GBNF grammar）。
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "subtitle_translations",
+                "strict": true,
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer" },
+                            "translation": { "type": "string" }
+                        },
+                        "required": ["id", "translation"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        }
     });
     let response = client
         .post(format!("{url}/v1/chat/completions"))
@@ -388,9 +418,28 @@ pub async fn translate_srt_with_local_llm(
         let units_json = serde_json::to_string(&batch.units)
             .map_err(|e| format!("构建本地翻译批次失败: {e}"))?;
         let prompt = build_batch_prompt(&units_json, &source_lang, &target_lang);
+
+        // 首次请求；解析失败则自动重试一次（grammar 已开启，重试成功率极高）。
         let raw = call_llama_chat(&status.url, &prompt).await?;
-        let mut items = parse_translation_items(&raw)?;
-        translated_items.append(&mut items);
+        let items = match parse_translation_items(&raw) {
+            Ok(items) => items,
+            Err(first_err) => {
+                crate::debug!(
+                    "[local-llm] batch {}/{} 首次解析失败，重试一次: {first_err}",
+                    i + 1,
+                    total
+                );
+                let raw_retry = call_llama_chat(&status.url, &prompt).await?;
+                parse_translation_items(&raw_retry).map_err(|retry_err| {
+                    format!(
+                        "批次 {}/{} 翻译解析失败（已重试）。首次: {first_err}; 重试: {retry_err}",
+                        i + 1,
+                        total
+                    )
+                })?
+            }
+        };
+        translated_items.extend(items);
     }
 
     let merge = rebuild_srt_with_translations(&blocks, &translated_items);
@@ -405,11 +454,18 @@ mod tests {
     use super::build_batch_prompt;
 
     #[test]
-    fn prompt_requires_json_only() {
+    fn prompt_requires_strict_json_with_ts_types() {
         let prompt = build_batch_prompt(r#"[{"id":1,"text":"hello"}]"#, "英语", "中文");
 
-        assert!(prompt.contains("只输出 JSON 数组"));
-        assert!(prompt.contains("id 和 translation"));
+        // TS 类型约束
+        assert!(prompt.contains("type TranslationItem"));
+        assert!(prompt.contains("type Result = TranslationItem[]"));
+        // 只输出 JSON 数组、禁止解释
+        assert!(prompt.contains("只输出 JSON 数组本身"));
+        // 字符串转义规则（最易翻车点）
+        assert!(prompt.contains("双引号必须转义"));
+        // 少样本示例 + 原始输入
         assert!(prompt.contains("hello"));
+        assert!(prompt.contains("示例"));
     }
 }

@@ -59,6 +59,7 @@
     "fs:allow-write-text-file",
     "dialog:default",
     "store:default",
+    "core:window:allow-set-theme",
     {
       "identifier": "http:default",
       "allow": [

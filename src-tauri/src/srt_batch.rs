@@ -189,14 +189,96 @@ pub fn parse_translation_items(raw_json: &str) -> Result<Vec<TranslationItem>, S
         return Ok(items);
     }
 
-    let value = serde_json::from_str::<serde_json::Value>(trimmed)
-        .map_err(|e| format!("翻译模型返回不是合法 JSON: {e}"))?;
-    if let Some(items) = value.get("items").or_else(|| value.get("translations")) {
-        return serde_json::from_value::<Vec<TranslationItem>>(items.clone())
-            .map_err(|e| format!("翻译模型 JSON 字段格式无效: {e}"));
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(items) = value.get("items").or_else(|| value.get("translations")) {
+            return serde_json::from_value::<Vec<TranslationItem>>(items.clone())
+                .map_err(|e| format!("翻译模型 JSON 字段格式无效: {e}"));
+        }
     }
 
-    Err("翻译模型 JSON 缺少数组结果".to_string())
+    // 兜底：尝试修复模型常见的输出错误（如漏掉字符串闭合引号）后再解析。
+    let repaired = repair_model_json(trimmed);
+    if repaired != trimmed {
+        if let Ok(items) = serde_json::from_str::<Vec<TranslationItem>>(&repaired) {
+            return Ok(items);
+        }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&repaired) {
+            if let Some(items) = value.get("items").or_else(|| value.get("translations")) {
+                if let Ok(items) = serde_json::from_value::<Vec<TranslationItem>>(items.clone()) {
+                    return Ok(items);
+                }
+            }
+        }
+    }
+
+    // 修复后仍失败，给出最终报错（带原始错误，便于上层重试或诊断）
+    let err = serde_json::from_str::<serde_json::Value>(trimmed)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "结构无法识别".to_string());
+    Err(format!("翻译模型返回不是合法 JSON: {err}"))
+}
+
+/// 启发式修复模型输出的 JSON。专治常见坏 case：
+/// - 字符串值漏掉闭合引号（本次现场：`{"translation":"(伦：嗯……)}` 缺末尾 `"`）。
+///
+/// 难点：漏闭合引号后，后续字符（含 `}` `,`）会被当成字符串内容，因此不能用
+/// 「跟踪 in_string」的状态机直接定位。这里用定向模式扫描：检测 `":"`（键值分隔
+/// 后的字符串值起始），从值起始引号向后扫描，若在遇到结构边界（`}` / `,` / `]`）
+/// 之前没有闭合 `"`，则判定漏引号，在边界前补一个 `"`。
+///
+/// 仅在 serde 解析失败时作为兜底调用，不影响正常路径。不依赖 regex。
+fn repair_model_json(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let n = chars.len();
+    let mut out = String::with_capacity(n + 16);
+    let mut i = 0;
+
+    while i < n {
+        // 检测 `":"` 模式：键名闭合引号 + 冒号 + 值起始引号。
+        // 注意要确保这是一个值字符串而非键名内部——`":"` 三连出现即可判定
+        // （键名总是以 `"` 结尾紧跟 `:`，值再以 `"` 开头）。
+        if i + 2 < n && chars[i] == '"' && chars[i + 1] == ':' && chars[i + 2] == '"' {
+            out.push('"');
+            out.push(':');
+            out.push('"');
+            let value_start = i + 3;
+            let mut k = value_start;
+            let mut found_closing = false;
+            let mut esc = false;
+            while k < n {
+                let c = chars[k];
+                if esc {
+                    esc = false;
+                    k += 1;
+                    continue;
+                }
+                if c == '\\' {
+                    esc = true;
+                    k += 1;
+                    continue;
+                }
+                if c == '"' {
+                    found_closing = true;
+                    break;
+                }
+                if c == '}' || c == ',' || c == ']' {
+                    // 到达结构边界仍未见闭合引号 → 漏引号
+                    break;
+                }
+                k += 1;
+            }
+            // 值内容 [value_start..k) 原样输出
+            out.extend(&chars[value_start..k]);
+            out.push('"'); // 正常情况输出闭合引号；漏引号情况补一个
+            i = if found_closing { k + 1 } else { k };
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+
+    out
 }
 
 pub fn rebuild_srt_with_translations(
@@ -304,6 +386,27 @@ mod tests {
         assert_eq!(wrapped[0].translation, "世界");
         assert_eq!(fenced[0].id, 3);
         assert_eq!(noisy[0].translation, "好的");
+    }
+
+    #[test]
+    fn repairs_missing_closing_quote_in_translation_values() {
+        // 现场模式：模型系统性漏掉字符串值的闭合引号
+        // （每个对象的 translation 值都以 `"` 开头但缺末尾 `"`，直接跟 `}`）
+        let broken = r#"[{"id":181,"translation":"(伦：嗯……)},{"id":182,"translation":"(伦：嗯……)}]"#;
+        let items = parse_translation_items(broken).unwrap();
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, 181);
+        assert_eq!(items[0].translation, "(伦：嗯……)");
+        assert_eq!(items[1].id, 182);
+    }
+
+    #[test]
+    fn repair_does_not_corrupt_well_formed_json() {
+        // 合法 JSON（含转义双引号）经修复后仍应正确解析，不被误改
+        let well_formed = r#"[{"id":1,"translation":"他说\"你好\""}]"#;
+        let items = parse_translation_items(well_formed).unwrap();
+        assert_eq!(items[0].translation, "他说\"你好\"");
     }
 
     #[test]
