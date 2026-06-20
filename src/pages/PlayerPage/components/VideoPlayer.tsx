@@ -129,6 +129,9 @@ export default function VideoPlayer({
         "pip",
         "fullscreen",
       ],
+      // 图标走本地 sprite（public/plyr.svg），避免在打包后的 Tauri 客户端里
+      // 因 CSP 拦截 / 离线而无法加载默认的 cdn.plyr.io 图标。
+      iconUrl: "/plyr.svg",
       captions: { active: hasSubtitles, language: "auto", update: true },
       i18n: {
         captions: "字幕",
