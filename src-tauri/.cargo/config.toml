@@ -1,0 +1,12 @@
+# Cargo 构建环境配置
+#
+# MACOSX_DEPLOYMENT_TARGET 决定编译产物兼容的最低 macOS 版本。
+# whisper.cpp (whisper-rs-sys) 的 C++ 代码使用 std::filesystem，该特性需要
+# macOS 10.15+。若不显式设置部署目标，cargo release profile 下 cmake 的默认
+# 推断可能低于 10.15，导致 'path' is unavailable 编译错误。
+#
+# 设置为 11.0 (Big Sur)：std::filesystem 在该版本上成熟稳定，且覆盖当前
+# 绝大多数活跃 Mac 用户。如需支持更老系统，可降至 10.15，但需测试边缘 case。
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"

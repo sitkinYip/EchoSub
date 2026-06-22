@@ -56,6 +56,12 @@ export interface TranslationState {
     sourceLang: Language;
     targetLang: Language;
     uploadVideo: boolean;
+    engine: TranslateEngine;
+    translationFallback: TranslationFallback;
+    whisperModelId: string;
+    whisperModelPath: string;
+    translateModelId: string;
+    translateModelPath: string;
   } | null;
 }
 
@@ -73,6 +79,8 @@ export interface TranslationActions {
     translateModelPath?: string,
     fileHash?: string,
     replaceHistoryId?: string,
+    whisperModelId?: string,
+    translateModelId?: string,
   ) => void;
   cancel: () => void;
   reset: () => void;
@@ -115,6 +123,8 @@ export const useTranslationStore = create<TranslationState & TranslationActions>
     translateModelPath,
     fileHash,
     replaceHistoryId,
+    whisperModelId,
+    translateModelId,
   ) => {
     startPipeline(
       filePath,
@@ -129,6 +139,8 @@ export const useTranslationStore = create<TranslationState & TranslationActions>
       translateModelPath,
       fileHash,
       replaceHistoryId,
+      whisperModelId,
+      translateModelId,
     );
   },
 

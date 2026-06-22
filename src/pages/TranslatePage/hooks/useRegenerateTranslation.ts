@@ -18,6 +18,7 @@ type UseRegenerateTranslationOptions = {
   regenerate: TranslationState["regenerate"];
   clearRegenerate: () => void;
   reset: () => void;
+  /** 保留以兼容 controller 调用；重新生成场景不再写全局设置 */
   update: UpdateSettings;
   startTranslation: StartTranslation;
 };
@@ -32,14 +33,26 @@ export function useRegenerateTranslation({
   startTranslation,
 }: UseRegenerateTranslationOptions) {
   const navigate = useNavigate();
+  // update 当前未使用：重新生成的设置通过 overrides 独立传递，不污染全局设置。
+  void update;
 
   useEffect(() => {
     if (!regenerate || appStep !== "idle" || !apiKey) return;
-    update({
+
+    // 重新生成使用独立的 overrides，完全不写全局设置。
+    // 语言和上传模式也走 override，保证本次会话隔离。
+    const overrides = {
+      engine: regenerate.engine,
+      translationFallback: regenerate.translationFallback,
+      whisperModelId: regenerate.whisperModelId,
+      whisperModelPath: regenerate.whisperModelPath,
+      translateModelId: regenerate.translateModelId,
+      translateModelPath: regenerate.translateModelPath,
       sourceLang: regenerate.sourceLang,
       targetLang: regenerate.targetLang,
       uploadVideo: regenerate.uploadVideo,
-    });
+    };
+
     clearRegenerate();
     reset();
 
@@ -72,6 +85,7 @@ export function useRegenerateTranslation({
               mode,
               fileHash,
               regenerate.replaceHistoryId || duplicate.id,
+              overrides,
             ),
         });
         return;
@@ -82,10 +96,11 @@ export function useRegenerateTranslation({
         mode,
         fileHash,
         regenerate.replaceHistoryId,
+        overrides,
       );
     })().catch((err) => {
       useTranslationStore.setState({ appStep: "idle", pipelinePhase: null });
       showFileCheckError(err);
     });
-  }, [apiKey, appStep, clearRegenerate, navigate, regenerate, reset, startTranslation, update]);
+  }, [apiKey, appStep, clearRegenerate, navigate, regenerate, reset, startTranslation]);
 }

@@ -461,10 +461,18 @@ interface HistoryEntry {
   status: "completed" | "error";
   error?: string;
   subtitleFilePath?: string;
+  engine?: TranslateEngine;
+  translationFallback?: TranslationFallback;
+  whisperModelId?: string;
+  whisperModelPath?: string;
+  translateModelId?: string;
+  translateModelPath?: string;
 }
 ```
 
 `subtitleFilePath` 指向 app data subtitles 缓存。导出到用户选择路径时不会覆盖这个缓存。
+
+`engine` 及后续模型字段为可选，老历史记录可能缺失。翻译完成时 `commitCompletedHistoryEntry` 写入当前使用的引擎与模型设置。重新生成时 `resolveRegenerateSettings` 优先用历史记录的值回填弹窗，缺失字段降级到全局 `settingsStore`，并在弹窗中提示"未保存原翻译设置"。重新生成的设置通过 `TranslationOverrides` 独立传递，不写全局设置。
 
 ## 11. 权限和安全边界
 

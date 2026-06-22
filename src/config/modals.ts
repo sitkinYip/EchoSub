@@ -68,7 +68,7 @@ export const MODAL_REGISTRY: Record<
       }>,
   },
   [ModalName.RegenerateConfirm]: {
-    defaults: { maskClosable: true, showClose: true, width: "md" },
+    defaults: { maskClosable: true, showClose: true, width: "lg" },
     loader: () =>
       import("../pages/HistoryPage/RegenerateConfirmModal.tsx") as Promise<{
         default: ErasedModalComponent;

@@ -6,9 +6,11 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { showModal } from "@/components/Modal/create";
 import { showMessage } from "@/components/Toast/create";
 import CardActionBtn from "@/components/CardActionBtn";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useTranslationStore } from "@/stores/translationStore";
 import { itemsToSrt } from "@/utils/srtParser";
-import type { HistoryEntry, Language } from "@/types";
+import type { HistoryEntry } from "@/types";
+import type { TranslationOverrides } from "@/pages/TranslatePage/utils/translationSettings";
 
 interface Props {
   entry: HistoryEntry;
@@ -66,22 +68,36 @@ export default function HistoryCard({ entry, onDelete }: Props) {
       exists = false;
     }
 
+    const s = useSettingsStore.getState();
     showModal("RegenerateConfirm", {
       videoName,
       videoPath,
       exists,
-      sourceLang,
-      targetLang,
-      uploadVideo: mode === "video",
-      onConfirm: (src: Language, tgt: Language, uv: boolean) => {
+      history: entry,
+      globalSettings: {
+        engine: s.engine,
+        translationFallback: s.translationFallback,
+        whisperModelId: s.whisperModelId,
+        whisperModelPath: s.whisperModelPath,
+        translateModelId: s.translateModelId,
+        translateModelPath: s.translateModelPath,
+        uploadVideo: s.uploadVideo,
+      },
+      onConfirm: (overrides: Required<TranslationOverrides>) => {
         setRegenerate({
           videoPath,
           videoName,
           fileHash: entry.fileHash,
           replaceHistoryId: id,
-          sourceLang: src,
-          targetLang: tgt,
-          uploadVideo: uv,
+          sourceLang: overrides.sourceLang,
+          targetLang: overrides.targetLang,
+          uploadVideo: overrides.uploadVideo,
+          engine: overrides.engine,
+          translationFallback: overrides.translationFallback,
+          whisperModelId: overrides.whisperModelId,
+          whisperModelPath: overrides.whisperModelPath,
+          translateModelId: overrides.translateModelId,
+          translateModelPath: overrides.translateModelPath,
         });
         navigate("/");
       },

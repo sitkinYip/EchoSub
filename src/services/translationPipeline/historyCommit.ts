@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showMessage } from "@/components/Toast/create";
 import { useHistoryStore } from "@/stores/historyStore";
+import type { TranslateEngine, TranslationFallback } from "@/config";
 import type { HistoryEntry, Language, SubtitleItem } from "@/types";
 import { itemsToSrt } from "@/utils/srtParser";
 
@@ -15,6 +16,13 @@ export type CreateHistoryEntryInput = {
   id?: string;
   subtitleFilePath?: string;
   fileHash?: string;
+  /** 翻译引擎与模型设置，写入历史记录供重新生成回填 */
+  engine?: TranslateEngine;
+  translationFallback?: TranslationFallback;
+  whisperModelId?: string;
+  whisperModelPath?: string;
+  translateModelId?: string;
+  translateModelPath?: string;
 };
 
 export type CommitCompletedHistoryInput = Omit<
@@ -48,6 +56,12 @@ export function createHistoryEntry(input: CreateHistoryEntryInput): HistoryEntry
     status: input.status,
     ...(input.error ? { error: input.error } : {}),
     ...(input.subtitleFilePath ? { subtitleFilePath: input.subtitleFilePath } : {}),
+    ...(input.engine ? { engine: input.engine } : {}),
+    ...(input.translationFallback ? { translationFallback: input.translationFallback } : {}),
+    ...(input.whisperModelId ? { whisperModelId: input.whisperModelId } : {}),
+    ...(input.whisperModelPath ? { whisperModelPath: input.whisperModelPath } : {}),
+    ...(input.translateModelId ? { translateModelId: input.translateModelId } : {}),
+    ...(input.translateModelPath ? { translateModelPath: input.translateModelPath } : {}),
   };
 }
 

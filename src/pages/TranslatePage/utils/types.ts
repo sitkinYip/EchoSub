@@ -1,5 +1,8 @@
 import type { TranslateEngine, TranslationFallback } from "@/config";
 import type { Language } from "@/types";
+import type { TranslationOverrides } from "./translationSettings";
+
+export type { TranslationOverrides };
 
 export type TranslateMode = "audio" | "video";
 
@@ -36,4 +39,6 @@ export type StartTranslation = (
   forceMode?: TranslateMode,
   fileHash?: string,
   replaceHistoryId?: string,
+  /** 本次会话的独立设置覆盖，不写全局；重新生成场景使用 */
+  overrides?: TranslationOverrides,
 ) => Promise<void>;

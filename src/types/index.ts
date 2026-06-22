@@ -1,3 +1,5 @@
+import type { TranslateEngine, TranslationFallback } from "@/config";
+
 export interface SubtitleItem {
   index: number;
   start: string;
@@ -25,4 +27,11 @@ export interface HistoryEntry {
   status: "completed" | "error";
   error?: string;
   subtitleFilePath?: string;
+  /** 翻译引擎与模型设置，老历史记录可能缺失，重新生成时降级到全局设置 */
+  engine?: TranslateEngine;
+  translationFallback?: TranslationFallback;
+  whisperModelId?: string;
+  whisperModelPath?: string;
+  translateModelId?: string;
+  translateModelPath?: string;
 }

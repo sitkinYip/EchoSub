@@ -1,12 +1,27 @@
-# 在此目录放置 FFmpeg 二进制文件
+# 在此目录放置 sidecar 二进制文件
 #
-# 命名规则 (Tauri Sidecar):
+# 文件较大，不入库（见 .gitignore），各开发者/构建机自行准备。
+# 准备好后此目录应包含以下文件（按目标平台）：
+#
+# ── ffmpeg（必需，自包含，双端处理一致）──
 #   macOS (Apple Silicon): ffmpeg-aarch64-apple-darwin
 #   macOS (Intel):         ffmpeg-x86_64-apple-darwin
 #   Windows:               ffmpeg-x86_64-pc-windows-msvc.exe
 #   Linux:                 ffmpeg-x86_64-unknown-linux-gnu
+#   下载：https://ffmpeg.org/download.html 获取对应平台的静态编译版，
+#   重命名为上述格式，macOS/Linux 执行 chmod +x。
 #
-# 下载方式:
-#   1. 从 https://ffmpeg.org/download.html 获取对应平台的静态编译版
-#   2. 重命名为上述格式并放入此目录
-#   3. 赋予执行权限 (macOS/Linux): chmod +x <filename>
+# ── llama-server + 动态库（本地字幕翻译用，必需）──
+#   macOS (Apple Silicon): llama-server-aarch64-apple-darwin + lib*.dylib
+#   macOS (Intel):         llama-server-x86_64-apple-darwin + lib*.dylib
+#   Windows:               llama-server-x86_64-pc-windows-msvc.exe + *.dll
+#   Linux:                 llama-server-x86_64-unknown-linux-gnu + lib*.so*
+#
+#   下载：https://github.com/ggml-org/llama.cpp/releases
+#   macOS 下载 llama-b<build号>-bin-macos-arm64.tar.gz，解压后复制
+#   llama-server 和全部 lib*.dylib 到此目录，重命名为带平台后缀的文件名。
+#   macOS 必须跑一次 npm run fix:macos-dylibs 修正 dylib 路径（详见 DEVELOPMENT.md §6.3）。
+#   Windows 下载 llama-b<build号>-bin-win-cpu-x64.zip，解压后复制
+#   llama-server.exe 和全部 *.dll 到此目录，重命名为带平台后缀的文件名。
+#
+# 详细准备流程见 DEVELOPMENT.md §6.3 llama-server sidecar 准备。

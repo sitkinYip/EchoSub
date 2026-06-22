@@ -35,6 +35,15 @@ import type { PipelineStepKey } from "@/pages/TranslatePage/utils/pipelineTypes"
 
 let pendingCtx: PendingCtx | null = null;
 
+type HistoryMeta = {
+  engine: TranslateEngine;
+  translationFallback: TranslationFallback;
+  whisperModelId: string;
+  whisperModelPath: string;
+  translateModelId: string;
+  translateModelPath: string;
+};
+
 type PendingCtx = {
   sessionId: number;
   filePath: string;
@@ -45,6 +54,7 @@ type PendingCtx = {
   sourceLang: Language;
   targetLang: Language;
   resolution: { width: number; height: number; size: number };
+  historyMeta: HistoryMeta;
 };
 
 function failPipelineStep(
@@ -102,6 +112,8 @@ export function startPipeline(
   translateModelPath = "",
   fileHash?: string,
   replaceHistoryId?: string,
+  whisperModelId = "",
+  translateModelId = "",
 ) {
   if (engine === "local") {
     startLocalPipeline(
@@ -116,6 +128,8 @@ export function startPipeline(
       translateModelPath,
       fileHash,
       replaceHistoryId,
+      whisperModelId,
+      translateModelId,
     );
     return;
   }
@@ -126,6 +140,15 @@ export function startPipeline(
   const set = safeSet(ss, _set);
   const get = (): TranslationState & TranslationActions => store.getState();
   pendingCtx = null;
+
+  const historyMeta: HistoryMeta = {
+    engine: "cloud",
+    translationFallback,
+    whisperModelId,
+    whisperModelPath,
+    translateModelId,
+    translateModelPath,
+  };
 
   get().initPipelineSteps({
     engine: "cloud",
@@ -184,6 +207,7 @@ export function startPipeline(
             sourceLang,
             targetLang,
             resolution: meta,
+            historyMeta,
           };
           set({ progress: `${picks(meta.height).pass1Label} — 等待确认` });
           get().waitPipelineStep("process-media", `${picks(meta.height).pass1Label}，等待确认`);
@@ -240,6 +264,7 @@ export function startPipeline(
         get,
         fileHash,
         replaceHistoryId,
+        historyMeta,
       );
     } catch (err) {
       if (!isAlive(ss)) return;
@@ -261,6 +286,8 @@ export function startLocalPipeline(
   translateModelPath = "",
   fileHash?: string,
   replaceHistoryId?: string,
+  whisperModelId = "",
+  translateModelId = "",
 ) {
   const store = useTranslationStore;
   const ss = newSession();
@@ -268,6 +295,15 @@ export function startLocalPipeline(
   const set = safeSet(ss, _set);
   const get = (): TranslationState & TranslationActions => store.getState();
   pendingCtx = null;
+
+  const historyMeta: HistoryMeta = {
+    engine: "local",
+    translationFallback,
+    whisperModelId,
+    whisperModelPath: modelPath,
+    translateModelId,
+    translateModelPath,
+  };
 
   get().initPipelineSteps({
     engine: "local",
@@ -355,6 +391,7 @@ export function startLocalPipeline(
         get,
         fileHash,
         replaceHistoryId,
+        historyMeta,
       );
     } catch (err) {
       if (!isAlive(ss)) return;
@@ -371,7 +408,16 @@ async function runCompress(ctx: PendingCtx) {
   const ss = requireSession(ctx.sessionId);
   if (!ss) return;
 
-  const { filePath, apiKey, sourceLang, targetLang, resolution, fileHash, replaceHistoryId } = ctx;
+  const {
+    filePath,
+    apiKey,
+    sourceLang,
+    targetLang,
+    resolution,
+    fileHash,
+    replaceHistoryId,
+    historyMeta,
+  } = ctx;
   const store = useTranslationStore;
   const _set = (s: Partial<TranslationState>) => store.setState(s);
   const set = safeSet(ss, _set);
@@ -443,6 +489,7 @@ async function runCompress(ctx: PendingCtx) {
       get,
       fileHash,
       replaceHistoryId,
+      historyMeta,
     );
     return;
   }
@@ -505,6 +552,7 @@ async function runCompress(ctx: PendingCtx) {
       get,
       fileHash,
       replaceHistoryId,
+      historyMeta,
     );
     return;
   }
@@ -530,6 +578,7 @@ async function runCompress(ctx: PendingCtx) {
     get,
     fileHash,
     replaceHistoryId,
+    historyMeta,
   );
 }
 
@@ -537,7 +586,7 @@ async function runAudio(ctx: PendingCtx) {
   const ss = requireSession(ctx.sessionId);
   if (!ss) return;
 
-  const { filePath, apiKey, sourceLang, targetLang, fileHash, replaceHistoryId } = ctx;
+  const { filePath, apiKey, sourceLang, targetLang, fileHash, replaceHistoryId, historyMeta } = ctx;
   const store = useTranslationStore;
   const _set = (s: Partial<TranslationState>) => store.setState(s);
   const set = safeSet(ss, _set);
@@ -574,6 +623,7 @@ async function runAudio(ctx: PendingCtx) {
     get,
     fileHash,
     replaceHistoryId,
+    historyMeta,
   );
 }
 
@@ -588,8 +638,9 @@ async function uploadAndTranslate(
   targetLang: Language,
   set: (p: Partial<TranslationState>) => void,
   get: () => TranslationState & TranslationActions,
-  fileHash?: string,
-  replaceHistoryId?: string,
+  fileHash: string | undefined,
+  replaceHistoryId: string | undefined,
+  historyMeta: HistoryMeta,
 ) {
   const uploadSize = (await invoke("get_file_info", { path: mediaFile }).catch(() => ({
     size: 0,
@@ -667,6 +718,7 @@ async function uploadAndTranslate(
       mediaType,
       fileHash,
       replaceHistoryId,
+      ...historyMeta,
     });
     get().completePipelineStep("save-history", "结果已保存");
 
@@ -744,8 +796,9 @@ async function localRecognizeAndTranslate(
   translateModelPath: string,
   set: (p: Partial<TranslationState>) => void,
   get: () => TranslationState & TranslationActions,
-  fileHash?: string,
-  replaceHistoryId?: string,
+  fileHash: string | undefined,
+  replaceHistoryId: string | undefined,
+  historyMeta: HistoryMeta,
 ) {
   if (ss.unlisten) {
     ss.unlisten();
@@ -823,6 +876,7 @@ async function localRecognizeAndTranslate(
       mediaType,
       fileHash,
       replaceHistoryId,
+      ...historyMeta,
     });
     get().completePipelineStep("save-history", "结果已保存");
 

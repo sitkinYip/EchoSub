@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "fix:macos-dylibs": "node scripts/fix-macos-dylibs.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

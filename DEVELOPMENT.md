@@ -300,42 +300,28 @@ Linux x64 获取方式：
 binaries/llama-server --host 127.0.0.1 --port 39117 --model <app-data>/llm-models/*.gguf --ctx-size 4096
 ```
 
-Tauri 配置使用未带平台后缀的 sidecar 名称：
+ffmpeg 和 llama-server 都在 `src-tauri/tauri.conf.json` 的 `bundle.externalBin` 里写死，双端都是必需 sidecar。二者配套的动态库通过平台特定配置文件声明为 resources：
 
-```json
-"externalBin": ["binaries/ffmpeg", "binaries/llama-server"]
-```
+- `src-tauri/tauri.conf.json`：主配置，`externalBin` 含 ffmpeg + llama-server，不含 resources。
+- `src-tauri/tauri.macos.conf.json`：macOS 覆盖，`resources: ["binaries/*.dylib"]`。
+- `src-tauri/tauri.windows.conf.json`：Windows 覆盖，`resources: ["binaries/*.dll"]`。
 
-实际文件必须按目标平台命名后放在 `src-tauri/binaries/` 下：
+Tauri 在构建时按当前平台自动读取对应的覆盖文件并深合并。`src-tauri/build.rs` 还会在 dev 模式把动态库复制到 `target/<profile>/binaries/`，使 sidecar 进程能在自身目录找到依赖。
+
+实际 sidecar 文件必须按目标平台命名后放在 `src-tauri/binaries/` 下：
 
 - macOS Apple Silicon：`src-tauri/binaries/llama-server-aarch64-apple-darwin`
 - macOS Intel：`src-tauri/binaries/llama-server-x86_64-apple-darwin`
 - Windows x64：`src-tauri/binaries/llama-server-x86_64-pc-windows-msvc.exe`
 - Linux x64：`src-tauri/binaries/llama-server-x86_64-unknown-linux-gnu`
 
-macOS Apple Silicon 获取方式：
-
-1. 官方 release 包：打开 `https://github.com/ggml-org/llama.cpp/releases`，下载 `llama-*-bin-macos-arm64.tar.gz`。
-2. 解压后复制 `llama-server` 为 `src-tauri/binaries/llama-server-aarch64-apple-darwin`。
-3. 同包里的 `lib*.dylib` 也要放到 `src-tauri/binaries/`，否则启动时可能报 `Library not loaded`。
-4. 执行 `chmod +x src-tauri/binaries/llama-server-aarch64-apple-darwin`。
-
-开发机也可以用 Homebrew 先验证本机是否能运行：
-
-```bash
-brew install llama.cpp
-llama-server --version
-```
-
-如果要把 Homebrew 的 `llama-server` 复制成 sidecar，需要同时处理它依赖的动态库和 rpath；更推荐使用官方 release 包或后续写专门脚本统一处理。
-
-Windows x64 获取方式：
+#### Windows x64
 
 1. 官方 release 包：打开 `https://github.com/ggml-org/llama.cpp/releases`。
 2. 优先下载 CPU 通用包 `llama-*-bin-win-cpu-x64.zip`；只有确认显卡驱动、CUDA/Vulkan 运行库匹配时，再选择 CUDA/Vulkan 包。
 3. 解压后复制 `llama-server.exe` 为 `src-tauri/binaries/llama-server-x86_64-pc-windows-msvc.exe`。
-4. 同包里的 `*.dll` 也要放到 `src-tauri/binaries/`，否则启动时可能报 DLL 缺失。
-5. 在 PowerShell 中验证：
+4. 同包里的 `*.dll` 也要放到 `src-tauri/binaries/`，否则启动时报 DLL 缺失。
+5. 验证：
 
 ```powershell
 .\src-tauri\binaries\llama-server-x86_64-pc-windows-msvc.exe --version
@@ -349,22 +335,94 @@ Copy-Item .\llama\llama-*\llama-server.exe .\src-tauri\binaries\llama-server-x86
 Copy-Item .\llama\llama-*\*.dll .\src-tauri\binaries\
 ```
 
-二进制准备好后再把 `binaries/llama-server` 加入 `src-tauri/tauri.conf.json` 的 `bundle.externalBin`。如果文件不存在就加入，Tauri 构建会因为 sidecar 资源缺失而失败。
+Windows 的 llama.cpp 官方包自带全套 DLL，依赖自包含，不需要额外处理。
 
-本地字幕翻译 fallback 已接入 `local_pipeline_translate`：
+#### macOS（Apple Silicon）
+
+**无论用官方 release 包还是 Homebrew，都必须跑一次 `npm run fix:macos-dylibs`。** 
+
+llama.cpp 的 macOS 二进制（包括官方 release 包）存在 dylib 路径不可移植的问题：install_name 和依赖路径指向构建机器的绝对目录，换一台 Mac 就会 `Library not loaded`（参见 [llama.cpp #19618](https://github.com/ggml-org/llama.cpp/issues/19618)、[#11321](https://github.com/ggml-org/llama.cpp/issues/11321)）。项目提供的 `fix:macos-dylibs` 脚本统一处理两种来源。
+
+**方式一：官方 release 包（推荐）**
+
+1. 打开 [https://github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases)。
+2. 找到最新 release，下载 macOS Apple Silicon 包：`llama-b<build号>-bin-macos-arm64.tar.gz`（例如 `llama-b9735-bin-macos-arm64.tar.gz`）。
+3. 解压：
+
+```bash
+mkdir -p /tmp/llama-pkg
+tar -xzf ~/Downloads/llama-*-bin-macos-arm64.tar.gz -C /tmp/llama-pkg
+```
+
+4. 复制 `llama-server` 和全部 `lib*.dylib` 到项目 binaries 目录：
+
+```bash
+cp /tmp/llama-pkg/llama-server src-tauri/binaries/llama-server-aarch64-apple-darwin
+cp /tmp/llama-pkg/lib*.dylib src-tauri/binaries/
+chmod +x src-tauri/binaries/llama-server-aarch64-apple-darwin
+```
+
+5. **跑可移植化脚本**（官方包的 dylib 仍有构建机路径，必须修正）：
+
+```bash
+npm run fix:macos-dylibs
+```
+
+**方式二：Homebrew**
+
+1. 安装：`brew install llama.cpp`
+2. 复制 `llama-server` 和全部 dylib：
+
+```bash
+BREW_LIB=$(brew --prefix llama.cpp)/lib
+cp $(brew --prefix llama.cpp)/bin/llama-server src-tauri/binaries/llama-server-aarch64-apple-darwin
+cp $BREW_LIB/lib*.dylib src-tauri/binaries/
+chmod +x src-tauri/binaries/llama-server-aarch64-apple-darwin
+```
+
+3. **跑可移植化脚本**（Homebrew 版的依赖路径硬编码了 `/opt/homebrew/opt/...`，必须修正）：
+
+```bash
+npm run fix:macos-dylibs
+```
+
+**`fix:macos-dylibs` 脚本做什么**
+
+- 把所有构建期绝对路径依赖（`/opt/homebrew/...`、`/Users/.../build/...` 等）改写成 `@rpath/<basename>`，但保留 `/usr/lib/`、`/System/` 等系统库不动
+- 修正各 dylib 的 install_name（`-id`）为 `@rpath/...`
+- 若 `llama-server` 缺少 `@loader_path` rpath，自动补充（保证 dylib 放同目录就能加载）
+- 从 Homebrew 补全缺失的 openssl 库（`libssl.3.dylib` / `libcrypto.3.dylib`）
+- 用 `codesign --force --sign -` 重新 ad-hoc 签名（`install_name_tool` 改动会令原签名失效）
+- 幂等：对已经修正过的文件会跳过，重复运行安全
+
+脚本完成后验证：
+
+```bash
+# llama-server 的依赖应全部是 @rpath 或 /usr/lib，无 /opt/homebrew 或构建机路径
+otool -L src-tauri/binaries/llama-server-aarch64-apple-darwin | grep -v "^/"
+otool -L src-tauri/binaries/llama-server-aarch64-apple-darwin | grep homebrew
+# 上一条应无输出
+
+# install_name 应是 @rpath/...
+otool -D src-tauri/binaries/libllama.0.dylib
+```
+
+注意：本机若被公司安全策略拦截（退出码 137 / AMFI / Xprotect），换官方 release 包或本机编译版本。
+
+#### 本地字幕翻译 fallback
+
+已接入 `local_pipeline_translate`：
 
 - `cloud-only`：只调用 DashScope 文本翻译。
 - `cloud-then-local`：DashScope 返回 `DataInspectionFailed` 时切到本地 llama-server。
 - `local-only`：跳过 DashScope，直接调用本地 llama-server。
 
-常见失败：
+#### 常见失败
 
-- `启动 llama-server 失败: No such file or directory (os error 2)`：`src-tauri/binaries/llama-server-{target-triple}` 不存在，或 `externalBin` 已配置但对应文件没放好。
-- `Library not loaded`：只复制了 `llama-server`，没有复制 release 包里的 `.dylib`。
-- Windows 报 DLL 缺失：只复制了 `llama-server.exe`，没有复制 release 包里的 `.dll`，或选择了 CUDA/Vulkan 包但本机运行库不匹配。
-- 进程立刻退出，退出码类似 `137`，macOS 日志出现 `AMFI`、`XprotectService`、`Gatekeeper`，或 Windows 安全中心/企业安全软件提示拦截：通常是系统安全策略、公司安全软件或下载来源校验拦截。此时不是代码参数问题，需要换本机编译/包管理器版本，或按公司安全策略放行。
-
-注意：在 `llama-server-{target-triple}` 二进制实际放入前，本地翻译路径启动失败是预期状态。
+- `启动 llama-server 失败: No such file or directory (os error 2)`：`src-tauri/binaries/llama-server-{target-triple}` 不存在。
+- `Library not loaded`：只复制了 `llama-server`，没有复制配套 `.dylib` / `.dll`。
+- macOS 报 `image not found` 且路径含 `/opt/homebrew`：dylib 未跑 `npm run fix:macos-dylibs`，依赖仍是 Homebrew 绝对路径。
+- 进程立刻退出（退出码 137，macOS 日志出现 `AMFI`/`XprotectService`/`Gatekeeper`，或 Windows 安全软件拦截）：系统安全策略拦截，需换本机编译/官方 release 包，或按安全策略放行。
 
 ## 7. 事件约定
 

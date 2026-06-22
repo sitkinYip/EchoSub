@@ -39,5 +39,3 @@ Desktop.ini
 *.log
 npm-debug.log*
 
-# ── Misc local tooling ───────────────────────────
-.aone_copilot/
