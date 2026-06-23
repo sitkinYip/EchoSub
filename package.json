@@ -13,6 +13,7 @@
     "format:check": "prettier --check .",
     "preview": "vite preview",
     "tauri": "tauri",
+    "prepare:macos-sidecars": "node scripts/prepare-macos-sidecars.mjs",
     "fix:macos-dylibs": "node scripts/fix-macos-dylibs.mjs"
   },
   "dependencies": {

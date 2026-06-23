@@ -339,73 +339,63 @@ Windows 的 llama.cpp 官方包自带全套 DLL，依赖自包含，不需要额
 
 #### macOS（Apple Silicon）
 
-**无论用官方 release 包还是 Homebrew，都必须跑一次 `npm run fix:macos-dylibs`。** 
+**推荐方式：一键脚本（不依赖任何本地环境）**
 
-llama.cpp 的 macOS 二进制（包括官方 release 包）存在 dylib 路径不可移植的问题：install_name 和依赖路径指向构建机器的绝对目录，换一台 Mac 就会 `Library not loaded`（参见 [llama.cpp #19618](https://github.com/ggml-org/llama.cpp/issues/19618)、[#11321](https://github.com/ggml-org/llama.cpp/issues/11321)）。项目提供的 `fix:macos-dylibs` 脚本统一处理两种来源。
+```bash
+npm run prepare:macos-sidecars
+```
 
-**方式一：官方 release 包（推荐）**
+脚本自动完成：查询 llama.cpp 最新 release → 下载 macOS arm64 官方包 → 解压 → 复制 `llama-server` + 全部 `lib*.dylib` 到 `src-tauri/binaries/` → 调用 `fix-macos-dylibs` 做路径检查。全程不依赖 Homebrew 或任何开发机工具，任何 Mac 上都能跑。
 
-1. 打开 [https://github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases)。
-2. 找到最新 release，下载 macOS Apple Silicon 包：`llama-b<build号>-bin-macos-arm64.tar.gz`（例如 `llama-b9735-bin-macos-arm64.tar.gz`）。
-3. 解压：
+**为什么官方包可以直接用**
+
+llama.cpp 官方 release 包（`llama-b<build号>-bin-macos-arm64.tar.gz`）是**静态链接、自包含**的：
+- 所有动态库依赖用 `@rpath/<basename>` 形式（可移植）
+- `llama-server` 自带 `@loader_path` rpath，dylib 放同目录就能加载
+- 不依赖 openssl、不依赖 Homebrew
+
+这与 ffmpeg 一样"放进去就能用"。`fix:macos-dylibs` 对官方包通常报告"0 处修正"（因为路径本来就对），保留它是为了：
+- 兜底：万一某天 llama.cpp 版本回退导致路径问题
+- 诊断：检测 binaries 里的 dylib 是否有不可移植的路径
+
+**手动方式（备用，不推荐）**
+
+如果无法用脚本（比如离线环境），可手动下载：
+
+1. 打开 [https://github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases)
+2. 下载 `llama-b<build号>-bin-macos-arm64.tar.gz`
+3. 解压并复制：
 
 ```bash
 mkdir -p /tmp/llama-pkg
 tar -xzf ~/Downloads/llama-*-bin-macos-arm64.tar.gz -C /tmp/llama-pkg
-```
-
-4. 复制 `llama-server` 和全部 `lib*.dylib` 到项目 binaries 目录：
-
-```bash
 cp /tmp/llama-pkg/llama-server src-tauri/binaries/llama-server-aarch64-apple-darwin
 cp /tmp/llama-pkg/lib*.dylib src-tauri/binaries/
 chmod +x src-tauri/binaries/llama-server-aarch64-apple-darwin
 ```
 
-5. **跑可移植化脚本**（官方包的 dylib 仍有构建机路径，必须修正）：
+4. 跑一次检查（对官方包通常是 no-op，但确认无误）：
 
 ```bash
 npm run fix:macos-dylibs
 ```
 
-**方式二：Homebrew**
+**不推荐：Homebrew 方式**
 
-1. 安装：`brew install llama.cpp`
-2. 复制 `llama-server` 和全部 dylib：
+`brew install llama.cpp` 复制出来的二进制**不可移植**——它的 dylib 依赖路径硬编码了 `/opt/homebrew/opt/...`，换一台没装相同 Homebrew 包的 Mac 就无法加载。虽然 `fix:macos-dylibs` 能修复，但比官方包多此一举，且会引入 openssl 依赖。除非有特殊原因，否则用官方包。
 
-```bash
-BREW_LIB=$(brew --prefix llama.cpp)/lib
-cp $(brew --prefix llama.cpp)/bin/llama-server src-tauri/binaries/llama-server-aarch64-apple-darwin
-cp $BREW_LIB/lib*.dylib src-tauri/binaries/
-chmod +x src-tauri/binaries/llama-server-aarch64-apple-darwin
-```
-
-3. **跑可移植化脚本**（Homebrew 版的依赖路径硬编码了 `/opt/homebrew/opt/...`，必须修正）：
+**验证**
 
 ```bash
-npm run fix:macos-dylibs
-```
-
-**`fix:macos-dylibs` 脚本做什么**
-
-- 把所有构建期绝对路径依赖（`/opt/homebrew/...`、`/Users/.../build/...` 等）改写成 `@rpath/<basename>`，但保留 `/usr/lib/`、`/System/` 等系统库不动
-- 修正各 dylib 的 install_name（`-id`）为 `@rpath/...`
-- 若 `llama-server` 缺少 `@loader_path` rpath，自动补充（保证 dylib 放同目录就能加载）
-- 从 Homebrew 补全缺失的 openssl 库（`libssl.3.dylib` / `libcrypto.3.dylib`）
-- 用 `codesign --force --sign -` 重新 ad-hoc 签名（`install_name_tool` 改动会令原签名失效）
-- 幂等：对已经修正过的文件会跳过，重复运行安全
-
-脚本完成后验证：
-
-```bash
-# llama-server 的依赖应全部是 @rpath 或 /usr/lib，无 /opt/homebrew 或构建机路径
-otool -L src-tauri/binaries/llama-server-aarch64-apple-darwin | grep -v "^/"
-otool -L src-tauri/binaries/llama-server-aarch64-apple-darwin | grep homebrew
-# 上一条应无输出
+# 依赖应全部是 @rpath 或系统库，无绝对路径
+otool -L src-tauri/binaries/llama-server-aarch64-apple-darwin | grep -E "homebrew|/Users/"
+# 应无输出
 
 # install_name 应是 @rpath/...
 otool -D src-tauri/binaries/libllama.0.dylib
 ```
+
+注意：本机若被公司安全策略拦截（退出码 137 / AMFI / Xprotect），换官方 release 包或在无拦截的机器上运行。
 
 注意：本机若被公司安全策略拦截（退出码 137 / AMFI / Xprotect），换官方 release 包或本机编译版本。
 

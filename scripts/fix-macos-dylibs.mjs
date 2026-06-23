@@ -1,21 +1,22 @@
 /**
  * macOS dylib 可移植化脚本（一次性运行）。
  *
- * llama.cpp 的 macOS 二进制（llama-server + lib*.dylib）从 Homebrew 复制而来，
- * 其 install_name 和依赖路径硬编码了 /opt/homebrew/opt/{pkg}/lib/... 绝对路径，
- * 换一台没装相同 Homebrew 包的 Mac 就无法加载。本脚本用 install_name_tool 把
- * 这些路径全部改写成 @rpath/<basename>，使动态库只要和 llama-server 放在同一目录
- * 就能被正确加载（llama-server 已有 @loader_path 的 rpath）。
+ * llama.cpp 的 macOS 二进制（llama-server + lib*.dylib）的 install_name 和依赖路径
+ * 硬编码了构建机器的绝对目录（官方 release 包的 /Users/runner/... 或 Homebrew 的
+ * /opt/homebrew/...），换一台 Mac 就无法加载（Library not loaded）。本脚本用
+ * install_name_tool 把这些路径改写成 @rpath/<basename>，使动态库只要和 llama-server
+ * 放在同一目录就能加载。
  *
- * 同时补全缺失的 openssl 库（libssl.3.dylib / libcrypto.3.dylib）。
+ * 推荐配合 prepare-macos-sidecars.mjs 使用（自动下载官方包 + 调用本脚本）。
+ * 不依赖开发机的 Homebrew 或任何本地环境。
  *
  * 使用：npm run fix:macos-dylibs
  * 前提：Xcode Command Line Tools 提供 install_name_tool。
- * 时机：把 llama.cpp release 包复制到 src-tauri/binaries/ 之后运行一次。
+ * 时机：把 llama.cpp 二进制复制到 src-tauri/binaries/ 之后运行一次（幂等，可重复运行）。
  */
 
-import { execSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, copyFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -108,30 +109,31 @@ function ensureLoaderPathRpath(file) {
   return false;
 }
 
-/** 补全 openssl 库：若 binaries 缺失，从 Homebrew 复制。 */
-function ensureOpenSSL() {
-  const needed = [
-    { name: "libssl.3.dylib", brew: "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib" },
-    { name: "libcrypto.3.dylib", brew: "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib" },
-  ];
-  const copied = [];
-  for (const lib of needed) {
-    const dest = join(BINARIES_DIR, lib.name);
-    if (existsSync(dest)) {
-      log(`openssl 已存在: ${lib.name}`);
-    } else if (existsSync(lib.brew)) {
-      copyFileSync(lib.brew, dest);
-      // Homebrew 的 openssl 库默认权限是 444（只读无执行位）。其他 dylib 都是
-      // 755。Tauri build 处理 resources 时对权限敏感（os error 13），
-      // 统一设为 755 保持一致。
-      spawnSync("chmod", ["755", dest], { stdio: "inherit" });
-      log(`从 Homebrew 复制: ${lib.name}`);
-      copied.push(dest);
-    } else {
-      warn(`Homebrew 未安装 ${lib.brew}，无法补全 ${lib.name}`);
+/** 检查 openssl 库是否存在。官方 release 包静态链接，不需要 openssl；
+ *  Homebrew 版动态链接了 openssl。若检测到依赖但文件缺失，提示用户。
+ *  不自动从 Homebrew 复制（避免依赖开发机环境）。 */
+function checkOpenSSL() {
+  const needed = ["libssl.3.dylib", "libcrypto.3.dylib"];
+  const missing = needed.filter((name) => !existsSync(join(BINARIES_DIR, name)));
+  if (missing.length > 0) {
+    // 检查是否有 dylib 实际依赖 openssl
+    const files = readdirSync(BINARIES_DIR).filter((f) => f.endsWith(".dylib"));
+    let needsSSL = false;
+    for (const f of files) {
+      const deps = otoolL(join(BINARIES_DIR, f)).join("\n");
+      if (deps.includes("libssl") || deps.includes("libcrypto")) {
+        needsSSL = true;
+        break;
+      }
+    }
+    if (needsSSL) {
+      warn(
+        `检测到 openssl 依赖但缺失 ${missing.join(", ")}。` +
+          `这通常是因为使用了 Homebrew 版 llama.cpp。` +
+          `推荐改用官方 release 包（npm run prepare:macos-sidecars 自动下载），它静态链接不需要 openssl。`,
+      );
     }
   }
-  return copied;
 }
 
 /** 处理单个文件：修正 install_name（-id）、依赖路径（-change）、补充 rpath，然后重新 ad-hoc 签名。
@@ -190,8 +192,8 @@ function main() {
 
   log("开始修正 macOS dylib 路径...");
 
-  // 1. 补全 openssl
-  ensureOpenSSL();
+  // 1. 检查 openssl 依赖状态（仅提示，不自动补全）
+  checkOpenSSL();
 
   // 2. 收集所有需要处理的文件：所有 .dylib + llama-server exe
   const dylibs = readdirSync(BINARIES_DIR)

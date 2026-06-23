@@ -17,11 +17,9 @@
 #   Windows:               llama-server-x86_64-pc-windows-msvc.exe + *.dll
 #   Linux:                 llama-server-x86_64-unknown-linux-gnu + lib*.so*
 #
-#   下载：https://github.com/ggml-org/llama.cpp/releases
-#   macOS 下载 llama-b<build号>-bin-macos-arm64.tar.gz，解压后复制
-#   llama-server 和全部 lib*.dylib 到此目录，重命名为带平台后缀的文件名。
-#   macOS 必须跑一次 npm run fix:macos-dylibs 修正 dylib 路径（详见 DEVELOPMENT.md §6.3）。
-#   Windows 下载 llama-b<build号>-bin-win-cpu-x64.zip，解压后复制
-#   llama-server.exe 和全部 *.dll 到此目录，重命名为带平台后缀的文件名。
+#   macOS 准备：npm run prepare:macos-sidecars（一键下载官方包，不依赖 Homebrew）
+#   Windows 准备：手动下载 llama-b<build号>-bin-win-cpu-x64.zip 解压
+#
+# 详细流程见 DEVELOPMENT.md §6.3 llama-server sidecar 准备。
 #
 # 详细准备流程见 DEVELOPMENT.md §6.3 llama-server sidecar 准备。
