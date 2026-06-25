@@ -214,11 +214,17 @@ llama.cpp server 生命周期 command 已接入，sidecar 名称为 `binaries/ll
 
 FFmpeg 是核心开发依赖，不是可选项。音频提取、WAV 转换、媒体探测、视频压缩、播放器兼容副本都通过前端 `Command.sidecar("binaries/ffmpeg", args)` 调用。
 
-Tauri 配置使用未带平台后缀的 sidecar 名称：
+FFmpeg 和 llama-server 的 sidecar 二进制都通过统一脚本准备（见 §6.3 开头），这里先说明 ffmpeg 的单独配置和手动备用方式。
 
-```json
-"externalBin": ["binaries/ffmpeg"]
+#### 统一脚本（推荐）
+
+```bash
+npm run prepare:sidecars
 ```
+
+脚本会自动判断平台，从官方源下载对应平台的 ffmpeg 静态编译版，解压并放到 `src-tauri/binaries/`。详细说明见 §6.3。
+
+#### 手动准备（离线/调试备用）
 
 实际文件必须按目标平台命名后放在 `src-tauri/binaries/` 下：
 
@@ -227,69 +233,44 @@ Tauri 配置使用未带平台后缀的 sidecar 名称：
 - Windows x64：`src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe`
 - Linux x64：`src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu`
 
-macOS Apple Silicon 获取方式：
+Tauri 配置使用未带平台后缀的 sidecar 名称，`externalBin: ["binaries/ffmpeg", "binaries/llama-server"]`。Tauri 构建时会自动按目标平台补全后缀。
 
-1. 推荐使用 Homebrew：`brew install ffmpeg`。Homebrew 会安装当前机器架构可运行的 FFmpeg。
-2. 复制 `$(which ffmpeg)` 为 `src-tauri/binaries/ffmpeg-aarch64-apple-darwin`。
-3. 执行 `chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin`。
-4. 用 sidecar 文件本身验证：`src-tauri/binaries/ffmpeg-aarch64-apple-darwin -version`。
-
-macOS Apple Silicon 示例命令：
+macOS Apple Silicon（从 evermeet.cx 下载静态编译版）：
 
 ```bash
 mkdir -p src-tauri/binaries
-brew install ffmpeg
-cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+curl -L "https://evermeet.cx/ffmpeg/getrelease/zip?build=arm64" -o /tmp/ffmpeg.zip
+tar -xf /tmp/ffmpeg.zip -C /tmp
+cp /tmp/ffmpeg src-tauri/binaries/ffmpeg-aarch64-apple-darwin
 chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
 src-tauri/binaries/ffmpeg-aarch64-apple-darwin -version
 ```
 
-macOS Intel 流程相同，但目标文件名是：
+也可用 Homebrew 安装后复制（`cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-aarch64-apple-darwin`），但 evermeet.cx 的静态版更干净（不依赖 Homebrew 路径）。
 
-```bash
-cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
-chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
-src-tauri/binaries/ffmpeg-x86_64-apple-darwin -version
+Windows x64（从 gyan.dev 下载 release essentials）：
+
+```powershell
+New-Item -ItemType Directory -Force .\src-tauri\binaries | Out-Null
+curl.exe -L "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -o ffmpeg-essentials.zip
+tar -xf ffmpeg-essentials.zip -C .\ffmpeg-pkg
+Copy-Item .\ffmpeg-pkg\ffmpeg-*-essentials_build\bin\ffmpeg.exe .\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe
+.\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe -version
 ```
 
-如果从浏览器下载 macOS 二进制而不是 Homebrew，下载后可能带 quarantine 标记。确认来源可信后，可对复制后的 sidecar 执行：
+Linux x64：使用发行版包管理器安装后复制，或下载静态 build（确认 glibc 兼容），目标文件名 `ffmpeg-x86_64-unknown-linux-gnu`，需 `chmod +x`。
+
+如果从浏览器下载 macOS 二进制带 quarantine 标记：
 
 ```bash
 xattr -dr com.apple.quarantine src-tauri/binaries/ffmpeg-*-apple-darwin
 ```
-
-Windows x64 获取方式：
-
-1. 打开 FFmpeg 官网下载页 `https://ffmpeg.org/download.html`，进入 Windows builds。
-2. 推荐下载 `gyan.dev` 的 release essentials 包：`https://www.gyan.dev/ffmpeg/builds/` 中的 `ffmpeg-release-essentials.zip`。
-3. 解压后复制包内 `bin/ffmpeg.exe` 为 `src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe`。
-4. 在 PowerShell 中验证：
-
-```powershell
-.\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe -version
-```
-
-Windows 示例命令：
-
-```powershell
-New-Item -ItemType Directory -Force .\src-tauri\binaries | Out-Null
-Expand-Archive .\ffmpeg-release-essentials.zip -DestinationPath .\ffmpeg
-Copy-Item .\ffmpeg\ffmpeg-*-essentials_build\bin\ffmpeg.exe .\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe
-.\src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe -version
-```
-
-Linux x64 获取方式：
-
-1. 可以使用发行版包管理器安装后复制 `which ffmpeg` 的结果。
-2. 也可以下载静态 build，但必须确认 glibc / 运行库与目标环境兼容。
-3. 目标文件名必须是 `src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu`，并且需要 `chmod +x`。
 
 常见失败：
 
 - `无法启动 FFmpeg: No such file or directory (os error 2)`：`ffmpeg-{target-triple}` 不存在，或文件放在了错误目录。
 - Windows 下只复制成 `ffmpeg.exe`：Tauri 找不到；必须命名为 `ffmpeg-x86_64-pc-windows-msvc.exe`。
 - macOS 下复制后没有执行权限：补 `chmod +x src-tauri/binaries/ffmpeg-*-apple-darwin`。
-- macOS 下浏览器下载的二进制被拦截：确认来源可信后移除 quarantine，或改用 Homebrew 安装后复制。
 - `externalBin` 配置了 `binaries/ffmpeg` 但对应平台文件不存在：`npm run tauri dev` 或构建会失败。
 
 ### 6.3 llama-server sidecar 准备
@@ -307,6 +288,24 @@ ffmpeg 和 llama-server 都在 `src-tauri/tauri.conf.json` 的 `bundle.externalB
 - `src-tauri/tauri.windows.conf.json`：Windows 覆盖，`resources: ["binaries/*.dll"]`。
 
 Tauri 在构建时按当前平台自动读取对应的覆盖文件并深合并。`src-tauri/build.rs` 还会在 dev 模式把动态库复制到 `target/<profile>/binaries/`，使 sidecar 进程能在自身目录找到依赖。
+
+#### 统一准备脚本（推荐，ffmpeg + llama 一起搞定）
+
+```bash
+npm run prepare:sidecars
+```
+
+`scripts/prepare-sidecars.mjs` 自动判断当前平台（macOS arm64 / Windows x64），一次完成：
+
+| 步骤 | macOS arm64 | Windows x64 |
+|---|---|---|
+| ffmpeg 下载源 | evermeet.cx 静态编译 arm64 版 | gyan.dev release-essentials |
+| llama 下载源 | GitHub release `macos-arm64.tar.gz` | GitHub release `bin-win-cpu-x64.zip` |
+| 路径修正 | 调用 `fix:macos-dylibs`（官方包通常是 no-op） | 无需（Windows DLL 无 rpath 问题） |
+
+脚本会先清理旧文件（避免版本残留），再下载解压复制。不依赖开发机的 Homebrew 或任何本地工具，只需 Node.js 和 `tar`（macOS 和 Windows 10+ 都自带）。其他平台（macOS Intel / Linux）会明确报错退出。
+
+幂等：可重复运行，每次先清理再重新下载。若中途中断会留下空 binaries 目录，重新运行即可恢复。
 
 实际 sidecar 文件必须按目标平台命名后放在 `src-tauri/binaries/` 下：
 

@@ -1,25 +1,19 @@
 # 在此目录放置 sidecar 二进制文件
 #
 # 文件较大，不入库（见 .gitignore），各开发者/构建机自行准备。
-# 准备好后此目录应包含以下文件（按目标平台）：
 #
-# ── ffmpeg（必需，自包含，双端处理一致）──
+# ── 推荐方式：一键脚本（自动判断平台，下载 ffmpeg + llama）──
+#   npm run prepare:sidecars
+#   支持 macOS arm64 和 Windows x64，不依赖任何本地环境。
+#
+# ── 准备好后此目录应包含以下文件（按目标平台）──
+#
+# ffmpeg（必需，自包含）：
 #   macOS (Apple Silicon): ffmpeg-aarch64-apple-darwin
-#   macOS (Intel):         ffmpeg-x86_64-apple-darwin
 #   Windows:               ffmpeg-x86_64-pc-windows-msvc.exe
-#   Linux:                 ffmpeg-x86_64-unknown-linux-gnu
-#   下载：https://ffmpeg.org/download.html 获取对应平台的静态编译版，
-#   重命名为上述格式，macOS/Linux 执行 chmod +x。
 #
-# ── llama-server + 动态库（本地字幕翻译用，必需）──
+# llama-server + 配套动态库（本地字幕翻译用，必需）：
 #   macOS (Apple Silicon): llama-server-aarch64-apple-darwin + lib*.dylib
-#   macOS (Intel):         llama-server-x86_64-apple-darwin + lib*.dylib
 #   Windows:               llama-server-x86_64-pc-windows-msvc.exe + *.dll
-#   Linux:                 llama-server-x86_64-unknown-linux-gnu + lib*.so*
 #
-#   macOS 准备：npm run prepare:macos-sidecars（一键下载官方包，不依赖 Homebrew）
-#   Windows 准备：手动下载 llama-b<build号>-bin-win-cpu-x64.zip 解压
-#
-# 详细流程见 DEVELOPMENT.md §6.3 llama-server sidecar 准备。
-#
-# 详细准备流程见 DEVELOPMENT.md §6.3 llama-server sidecar 准备。
+# 详细流程见 DEVELOPMENT.md §6.2 (ffmpeg) 和 §6.3 (llama-server)。
