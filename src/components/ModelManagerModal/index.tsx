@@ -7,12 +7,15 @@ import {
   deleteTranslateModel,
   deleteWhisperModel,
   downloadTranslateModel,
+  downloadVadModel,
   downloadWhisperModel,
   getLocalTranslateModels,
   getLocalWhisperModels,
   listTranslateModels,
   listWhisperModels,
   onModelDownloadProgress,
+  VAD_MODEL_ID,
+  checkVadModelExists,
   type LocalTranslateModel,
   type LocalWhisperModel,
   type ModelDownloadProgress,
@@ -30,7 +33,7 @@ type ModelManagerData = {
   onTranslateSelected?: (model: LocalTranslateModel) => void | Promise<void>;
 };
 
-type BusyKey = `whisper:${string}` | `translate:${string}`;
+type BusyKey = `whisper:${string}` | `translate:${string}` | "vad";
 
 function formatMB(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -56,6 +59,9 @@ export default function ModelManagerModal({ close, data }: ModalContentProps<Mod
     id: data?.selectedTranslateId || "",
     path: data?.selectedTranslatePath || "",
   });
+  const [vadInstalled, setVadInstalled] = useState(false);
+  const [vadBusy, setVadBusy] = useState(false);
+  const [vadError, setVadError] = useState<string | null>(null);
   const validateLocalModels = useSettingsStore((s) => s.validateLocalModels);
 
   const localById = useMemo(() => {
@@ -71,16 +77,18 @@ export default function ModelManagerModal({ close, data }: ModalContentProps<Mod
   }, [localTranslateModels]);
 
   const refresh = async () => {
-    const [remote, local, translateRemote, translateLocal] = await Promise.all([
+    const [remote, local, translateRemote, translateLocal, vadExists] = await Promise.all([
       listWhisperModels(),
       getLocalWhisperModels(),
       listTranslateModels(),
       getLocalTranslateModels(),
+      checkVadModelExists(),
     ]);
     setModels(remote);
     setLocalModels(local);
     setTranslateModels(translateRemote);
     setLocalTranslateModels(translateLocal);
+    setVadInstalled(vadExists);
   };
 
   useEffect(() => {
@@ -257,6 +265,31 @@ export default function ModelManagerModal({ close, data }: ModalContentProps<Mod
     }
   };
 
+  const downloadVad = async () => {
+    setVadBusy(true);
+    setVadError(null);
+    try {
+      await downloadVadModel();
+      await refresh();
+      showMessage({
+        type: "success",
+        title: "VAD 降噪模型已下载",
+        description: "本地转录将自动启用语音活动检测，过滤纯音乐/无人声段。",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setVadError(message);
+      showMessage({
+        type: "error",
+        title: "VAD 模型下载失败",
+        description: message,
+        duration: 8000,
+      });
+    } finally {
+      setVadBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div>
@@ -292,6 +325,76 @@ export default function ModelManagerModal({ close, data }: ModalContentProps<Mod
           {inlineError}
         </div>
       )}
+
+      {/* VAD 降噪模型（辅助模型，服务于识别与翻译：过滤纯音乐/无人声段，去除 [音乐] 等非语音内容） */}
+      {(() => {
+        const p = progress[VAD_MODEL_ID];
+        return (
+          <div
+            className={`rounded-lg ring-1 p-3 transition-colors ${
+              vadInstalled
+                ? "bg-app-success-bg ring-app-success-ring"
+                : "bg-app-surface ring-app-border"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-app-surface-alt ring-1 ring-app-border-light flex items-center justify-center flex-shrink-0">
+                <Icon name="waveform" className="w-4 h-4 text-app-text-secondary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-app-text">VAD 降噪模型</span>
+                  {vadInstalled ? (
+                    <span className="text-[10px] text-app-success bg-app-success-bg ring-1 ring-app-success-ring rounded px-1.5 py-0.5">
+                      已启用
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-app-text-tertiary bg-app-surface ring-1 ring-app-border-light rounded px-1.5 py-0.5">
+                      可选
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-app-text-tertiary">
+                  语音活动检测 · 约 2 MB · 过滤纯音乐、静音、无人声段，自动去除 [音乐] 等非语音字幕。
+                  未下载不影响使用，仅少一层音频级过滤。
+                </p>
+                {vadBusy && p?.percent !== undefined && p.percent !== null && (
+                  <div className="mt-3 space-y-1">
+                    <div className="h-1.5 rounded-full bg-app-border overflow-hidden">
+                      <div
+                        className="h-full bg-app-accent transition-all"
+                        style={{ width: `${p.percent}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-app-text-tertiary">下载中 {p.percent}%</p>
+                  </div>
+                )}
+                {vadBusy && (p?.percent === undefined || p.percent === null) && (
+                  <p className="mt-2 text-[10px] text-app-text-tertiary">正在连接下载源...</p>
+                )}
+                {vadError && (
+                  <p className="mt-2 text-[10px] text-app-error leading-relaxed break-words">
+                    {vadError}
+                  </p>
+                )}
+              </div>
+              {!vadInstalled && (
+                <button
+                  onClick={downloadVad}
+                  className="w-8 h-8 rounded-lg bg-app-surface hover:bg-app-hover ring-1 ring-app-border-light flex items-center justify-center text-app-text-secondary transition-colors disabled:opacity-50 flex-shrink-0"
+                  disabled={vadBusy || !!busyKey}
+                  title="下载 VAD 降噪模型"
+                >
+                  <Icon
+                    name={vadBusy ? "spinner" : "download-cloud"}
+                    className={`w-3.5 h-3.5 ${vadBusy ? "animate-spin" : ""}`}
+                  />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-app-text-tertiary py-8">

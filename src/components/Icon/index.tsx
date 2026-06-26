@@ -113,4 +113,10 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M12 8h.01" />
     </>
   ),
+  waveform: (
+    <>
+      <path d="M3 12h2M19 12h2" />
+      <path d="M7 9v6M11 5v14M15 8v8" />
+    </>
+  ),
 };

@@ -398,6 +398,58 @@ pub async fn download_whisper_model(
     download_model_file(app, state, id, model.url, final_path, "model-download").await
 }
 
+/// Silero VAD 模型常量。用于本地 ASR 前置的语音活动检测，
+/// 让 whisper.cpp 在推理前跳过纯音乐/无人声段，过滤 [音乐] 等非语音内容。
+/// ~2MB，与 Whisper 主模型同放 app_data_dir/models 目录。
+///
+/// 仓库与文件名以 whisper.cpp 官方脚本 models/download-vad-model.sh 为准：
+///   src=https://huggingface.co/ggml-org/whisper-vad ，文件 ggml-silero-v5.1.2.bin。
+/// 直连 HuggingFace 在部分网络环境下会被 DNS 污染/阻断，因此保留 hf-mirror 镜像作为备用源。
+const VAD_MODEL_FILE: &str = "ggml-silero-v5.1.2.bin";
+const VAD_MODEL_URLS: [&str; 2] = [
+    "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+    "https://hf-mirror.com/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+];
+
+#[tauri::command]
+pub fn check_vad_model_exists(app: AppHandle) -> Result<bool, String> {
+    Ok(models_dir(&app)?.join(VAD_MODEL_FILE).is_file())
+}
+
+#[tauri::command]
+pub async fn download_vad_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let final_path = models_dir(&app)?.join(VAD_MODEL_FILE);
+
+    // HuggingFace 直连在部分网络环境（DNS 污染/连接阻断）下不可达，
+    // 故依次尝试主源与镜像源，任一成功即返回；全部失败时回传最后一次错误。
+    let mut last_err = String::new();
+    for url in VAD_MODEL_URLS.iter() {
+        crate::debug!("[vad-download] 尝试源: {url}");
+        match download_model_file(
+            app.clone(),
+            state.clone(),
+            "vad".to_string(),
+            url,
+            final_path.clone(),
+            "model-download",
+        )
+        .await
+        {
+            Ok(path) => return Ok(path),
+            Err(e) => {
+                crate::debug!("[vad-download] 源 {url} 失败: {e}");
+                last_err = e;
+            }
+        }
+    }
+    Err(format!(
+        "VAD 模型下载失败（已尝试全部镜像源）：{last_err}"
+    ))
+}
+
 #[tauri::command]
 pub async fn download_translate_model(
     app: AppHandle,

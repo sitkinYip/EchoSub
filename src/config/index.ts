@@ -72,4 +72,5 @@ export type IconName =
   | "moon"
   | "sun"
   | "warning"
-  | "help";
+  | "help"
+  | "waveform";

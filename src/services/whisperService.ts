@@ -85,6 +85,21 @@ export async function checkTranslateModelExists(id: string): Promise<boolean> {
   return (await invoke("check_translate_model_exists", { id })) as boolean;
 }
 
+/**
+ * VAD（语音活动检测）降噪模型。用于本地 ASR 前置过滤纯音乐/无人声段，
+ * 过滤 [音乐] 等非语音内容。单一辅助模型，非多选一。
+ * 下载进度事件 id 为 "vad"，可被 onModelDownloadProgress 捕获。
+ */
+export const VAD_MODEL_ID = "vad";
+
+export async function checkVadModelExists(): Promise<boolean> {
+  return (await invoke("check_vad_model_exists")) as boolean;
+}
+
+export async function downloadVadModel(): Promise<string> {
+  return (await invoke("download_vad_model")) as string;
+}
+
 export function onModelDownloadProgress(
   handler: (progress: ModelDownloadProgress) => void,
 ): Promise<() => void> {

@@ -18,8 +18,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use tauri::{AppHandle, Emitter, Manager};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadParams,
+};
 
 use crate::state::AppState;
 use crate::types::TaskEvent;
@@ -201,6 +203,31 @@ pub fn run_whisper_blocking_with_events(
         params.set_language(None);
     }
 
+    // P1：调参压制非语音内容与幻觉。
+    // suppress_blank 抑制开头空白 token；suppress_nst 在 token 层面抑制 [BLANK_AUDIO] 等
+    // 非语音事件标记（NST = Non-Speech Tokens），是过滤 [音乐]/(music) 这类标记的关键。
+    // logprob_thold 丢弃平均 log 概率过低的段（模型自己都不确信），治 "Thank you." 这类静音幻觉。
+    params.set_suppress_blank(true);
+    params.set_suppress_nst(true);
+    params.set_logprob_thold(-0.8);
+
+    // P2：VAD（语音活动检测）。若已下载 Silero VAD 模型，让 whisper.cpp 在推理前先跳过无人声段，
+    // 效果最接近云端"过滤非语音内容"。模型缺失时自动降级（仅靠 P1+P0），不阻塞用户。
+    let vad_path = app
+        .path()
+        .app_data_dir()
+        .map(|d| d.join("models").join("ggml-silero-v5.bin"))
+        .ok();
+    if let Some(path) = vad_path {
+        if path.is_file() {
+            let path_str = path.to_string_lossy();
+            params.set_vad_model_path(Some(&path_str));
+            let mut vad = WhisperVadParams::new();
+            vad.set_threshold(0.5);
+            params.set_vad_params(vad);
+        }
+    }
+
     // 进度回调：0..=100。闭包需 'static，把 AppHandle/task_id 通过 Arc 传入。
     let prog_app = Arc::new(app.clone());
     let prog_task = task_id.clone();
@@ -247,6 +274,12 @@ pub fn run_whisper_blocking_with_events(
             .map_err(|e| format!("读取片段文本失败: {e}"))?;
         let text = text.trim();
         if text.is_empty() {
+            continue;
+        }
+        // P0：no_speech 概率过滤。Whisper 对每个段都自评"没人说话"的概率；
+        // 纯音乐/静音段此概率很高（常伴随低置信的 [音乐]/幻觉词）。阈值 0.6 丢弃这类段。
+        // 注：whisper-rs 的 set_no_speech_thold 源码标注 "not implemented"，故手动判断。
+        if seg.no_speech_probability() > 0.6 {
             continue;
         }
         idx += 1;

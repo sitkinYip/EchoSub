@@ -290,31 +290,34 @@ pub fn rebuild_srt_with_translations(
         .map(|item| (item.id, item.translation.trim().to_string()))
         .collect::<HashMap<_, _>>();
     let mut warnings = Vec::new();
-    let mut srt = String::new();
+    let mut kept: Vec<String> = Vec::new();
 
-    for (position, block) in blocks.iter().enumerate() {
-        let text = match translations.get(&block.index) {
-            Some(translation) if !translation.is_empty() => translation.as_str(),
-            Some(_) => {
-                warnings.push(format!("字幕 {} 的翻译为空，已保留原文", block.index));
-                block.text.as_str()
-            }
-            None => {
-                warnings.push(format!("字幕 {} 缺少翻译，已保留原文", block.index));
-                block.text.as_str()
-            }
+    for block in blocks.iter() {
+        // P3：非语音内容兜底。以下情况丢弃整条字幕块（与 Whisper 侧 P0/P1/P2 形成双重保险）：
+        //   - 译文为哨兵 `<SKIP>`（不区分大小写）：翻译模型识别出纯音乐/音效/掌声标记。
+        //   - 译文为空或缺失：视为该段无有效语音内容。
+        // 用户已确认：丢弃整条，而非保留原文。
+        let translation = translations.get(&block.index);
+        let should_skip = match translation {
+            Some(t) if t.eq_ignore_ascii_case("<SKIP>") => true,
+            Some(t) if t.is_empty() => true,
+            None => true,
+            _ => false,
         };
+        if should_skip {
+            crate::debug!("[srt-rebuild] 丢弃非语音/空翻译字幕块 index={}", block.index);
+            continue;
+        }
 
-        srt.push_str(&format!(
-            "{}\n{} --> {}\n{}\n",
-            position + 1,
+        // 安全的 unwrap：上面已确认既非 None 也非空、非 SKIP。
+        let text = translations.get(&block.index).map(|s| s.as_str()).unwrap_or_default();
+        kept.push(format!(
+            "{}\n{} --> {}\n{}",
+            kept.len() + 1,
             block.start,
             block.end,
             text
         ));
-        if position + 1 < blocks.len() {
-            srt.push('\n');
-        }
     }
 
     for item in translated_items {
@@ -323,6 +326,7 @@ pub fn rebuild_srt_with_translations(
         }
     }
 
+    let srt = kept.join("\n\n");
     TranslationMerge { srt, warnings }
 }
 

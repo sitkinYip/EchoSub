@@ -73,6 +73,8 @@ pub fn run() {
             model_manager::delete_translate_model,
             model_manager::check_whisper_model_exists,
             model_manager::check_translate_model_exists,
+            model_manager::download_vad_model,
+            model_manager::check_vad_model_exists,
             local_llm::start_local_llm_server,
             local_llm::stop_local_llm_server,
             local_llm::get_local_llm_server_status,
